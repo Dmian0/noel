@@ -1,0 +1,5 @@
+Carpeta de Música Navideña para NavidadBar 🎄
+
+Puedes copiar o arrastrar tus canciones navideñas favoritas (.mp3, .m4a, .wav, .aac) directamente a esta carpeta y luego presionar "Recargar" en el menú de NavidadBar.
+
+También puedes elegir cualquier otra carpeta de tu Mac desde el botón "Elegir carpeta con mis MP3..." dentro de la app.
