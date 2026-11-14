@@ -205,6 +205,9 @@ struct PopoverContentView: View {
     // MARK: - Main View Content
     private var mainContentView: some View {
         VStack(spacing: 12) {
+            // Music Source Selector (Noël · Spotify · Apple Music)
+            musicSourceBar
+
             // Hero: Vinyl Record + Now Playing Track
             heroVinylTrackSection
 
@@ -222,6 +225,61 @@ struct PopoverContentView: View {
             if state.isSnowing || state.showTopLights || audio.isFireplacePlaying {
                 activeEffectsContextualSection
             }
+        }
+    }
+
+    // MARK: - Music Source Selector Bar
+    private var musicSourceBar: some View {
+        HStack(spacing: 3) {
+            ForEach(MusicPlayerProvider.allCases) { provider in
+                let selected = audio.musicProvider == provider
+                Button(action: {
+                    withAnimation(.easeInOut(duration: 0.15)) {
+                        audio.musicProvider = provider
+                    }
+                }) {
+                    Text(musicProviderTitle(provider))
+                        .font(monoFont(size: 8.5, weight: selected ? .bold : .medium))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 3.5)
+                        .background(
+                            selected
+                                ? (isDark ? Color(hex: 0xF4EFE6).opacity(0.15) : Color(hex: 0x1D3B2E))
+                                : Color.clear
+                        )
+                        .foregroundColor(
+                            selected
+                                ? (isDark ? Color(hex: 0xF4EFE6) : Color(hex: 0xF6F0E4))
+                                : secondaryTextColor
+                        )
+                        .cornerRadius(4)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 4)
+                                .stroke(
+                                    selected
+                                        ? (isDark ? goldBrassColor.opacity(0.4) : goldBrassColor.opacity(0.6))
+                                        : Color.clear,
+                                    lineWidth: selected ? 1 : 0
+                                )
+                        )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(2)
+        .background(surfaceCardColor)
+        .cornerRadius(6)
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .stroke(surfaceCardBorder, lineWidth: 1)
+        )
+    }
+
+    private func musicProviderTitle(_ provider: MusicPlayerProvider) -> String {
+        switch provider {
+        case .noel: return "NOËL"
+        case .spotify: return "SPOTIFY"
+        case .appleMusic: return "APPLE MUSIC"
         }
     }
 
@@ -244,22 +302,18 @@ struct PopoverContentView: View {
 
             // Track details + playback controls
             VStack(alignment: .leading, spacing: 3) {
-                Text(audio.currentTrack?.localizedTitle ?? (isEn ? "No music selected" : "Sin música seleccionada"))
+                Text(audio.displayTrackTitle)
                     .font(titleFont(size: 15))
                     .fontWeight(.semibold)
                     .foregroundColor(primaryTextColor)
                     .lineLimit(1)
                     .truncationMode(.tail)
 
-                if let track = audio.currentTrack {
-                    Text(track.isBuiltIn ? (isEn ? "MUSIC BOX" : "CAJA DE MÚSICA") : (isEn ? "LOCAL MP3" : "MP3 LOCAL"))
-                        .font(monoFont(size: 9.5, weight: .medium))
-                        .foregroundColor(secondaryTextColor)
-                } else {
-                    Text(isEn ? "PLAYLIST" : "LISTA")
-                        .font(monoFont(size: 9.5, weight: .medium))
-                        .foregroundColor(secondaryTextColor)
-                }
+                Text(audio.displayTrackSubtitle)
+                    .font(monoFont(size: 9.5, weight: .medium))
+                    .foregroundColor(secondaryTextColor)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
 
                 // Control buttons row: backward, play/pause, forward, shuffle, track list toggle
                 HStack(spacing: 10) {
@@ -341,83 +395,87 @@ struct PopoverContentView: View {
                     .foregroundColor(secondaryTextColor)
             }
 
-            // Source filter tabs
-            HStack(spacing: 4) {
-                ForEach(MusicSourceFilter.allCases) { filter in
-                    let selected = audio.sourceFilter == filter
-                    Button(action: { audio.sourceFilter = filter }) {
-                        Text(sourceFilterTitle(filter))
-                            .font(monoFont(size: 9, weight: selected ? .bold : .medium))
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 4)
-                            .background(
-                                selected
-                                    ? (isDark ? Color(hex: 0xF4EFE6).opacity(0.15) : Color(hex: 0x1D3B2E))
-                                    : Color.clear
-                            )
-                            .foregroundColor(
-                                selected
-                                    ? (isDark ? Color(hex: 0xF4EFE6) : Color(hex: 0xF6F0E4))
-                                    : secondaryTextColor
-                            )
-                            .cornerRadius(4)
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(2)
-            .background(surfaceCardColor)
-            .cornerRadius(6)
-
-            // Scrollable tracks
-            ScrollView {
-                LazyVStack(spacing: 2) {
-                    if audio.filteredTracks.isEmpty {
-                        Text(isEn ? "NO TRACKS AVAILABLE" : "NO HAY CANCIONES DISPONIBLES")
-                            .font(monoFont(size: 9))
-                            .foregroundColor(secondaryTextColor)
-                            .padding(.vertical, 8)
-                            .frame(maxWidth: .infinity)
-                    } else {
-                        ForEach(audio.filteredTracks) { track in
-                            let isCurrent = audio.currentTrack?.id == track.id
-                            Button(action: { audio.playTrack(track) }) {
-                                HStack(spacing: 6) {
-                                    Image(systemName: isCurrent && audio.isPlaying ? "speaker.wave.2.fill" : (isCurrent ? "speaker.fill" : "music.note"))
-                                        .font(.system(size: 9))
-                                        .foregroundColor(isCurrent ? accentRedColor : secondaryTextColor)
-                                        .frame(width: 12)
-
-                                    Text(track.localizedTitle)
-                                        .font(monoFont(size: 10, weight: isCurrent ? .bold : .regular))
-                                        .foregroundColor(isCurrent ? primaryTextColor : secondaryTextColor)
-                                        .lineLimit(1)
-                                        .truncationMode(.tail)
-
-                                    Spacer()
-
-                                    Text(track.isBuiltIn ? (isEn ? "BOX" : "CAJA") : "MP3")
-                                        .font(monoFont(size: 8))
-                                        .foregroundColor(secondaryTextColor.opacity(0.8))
-                                }
-                                .padding(.vertical, 3)
-                                .padding(.horizontal, 6)
-                                .background(isCurrent ? surfaceCardColor : Color.clear)
+            if audio.musicProvider == .noel {
+                // Source filter tabs
+                HStack(spacing: 4) {
+                    ForEach(MusicSourceFilter.allCases) { filter in
+                        let selected = audio.sourceFilter == filter
+                        Button(action: { audio.sourceFilter = filter }) {
+                            Text(sourceFilterTitle(filter))
+                                .font(monoFont(size: 9, weight: selected ? .bold : .medium))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 4)
+                                .background(
+                                    selected
+                                        ? (isDark ? Color(hex: 0xF4EFE6).opacity(0.15) : Color(hex: 0x1D3B2E))
+                                        : Color.clear
+                                )
+                                .foregroundColor(
+                                    selected
+                                        ? (isDark ? Color(hex: 0xF4EFE6) : Color(hex: 0xF6F0E4))
+                                        : secondaryTextColor
+                                )
                                 .cornerRadius(4)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(2)
+                .background(surfaceCardColor)
+                .cornerRadius(6)
+
+                // Scrollable tracks
+                ScrollView {
+                    LazyVStack(spacing: 2) {
+                        if audio.filteredTracks.isEmpty {
+                            Text(isEn ? "NO TRACKS AVAILABLE" : "NO HAY CANCIONES DISPONIBLES")
+                                .font(monoFont(size: 9))
+                                .foregroundColor(secondaryTextColor)
+                                .padding(.vertical, 8)
+                                .frame(maxWidth: .infinity)
+                        } else {
+                            ForEach(audio.filteredTracks) { track in
+                                let isCurrent = audio.currentTrack?.id == track.id
+                                Button(action: { audio.playTrack(track) }) {
+                                    HStack(spacing: 6) {
+                                        Image(systemName: isCurrent && audio.isPlaying ? "speaker.wave.2.fill" : (isCurrent ? "speaker.fill" : "music.note"))
+                                            .font(.system(size: 9))
+                                            .foregroundColor(isCurrent ? accentRedColor : secondaryTextColor)
+                                            .frame(width: 12)
+
+                                        Text(track.localizedTitle)
+                                            .font(monoFont(size: 10, weight: isCurrent ? .bold : .regular))
+                                            .foregroundColor(isCurrent ? primaryTextColor : secondaryTextColor)
+                                            .lineLimit(1)
+                                            .truncationMode(.tail)
+
+                                        Spacer()
+
+                                        Text(track.isBuiltIn ? (isEn ? "BOX" : "CAJA") : "MP3")
+                                            .font(monoFont(size: 8))
+                                            .foregroundColor(secondaryTextColor.opacity(0.8))
+                                    }
+                                    .padding(.vertical, 3)
+                                    .padding(.horizontal, 6)
+                                    .background(isCurrent ? surfaceCardColor : Color.clear)
+                                    .cornerRadius(4)
+                                }
+                                .buttonStyle(.plain)
                             }
-                            .buttonStyle(.plain)
                         }
                     }
+                    .padding(4)
                 }
-                .padding(4)
+                .frame(maxHeight: 110)
+                .background(surfaceCardColor)
+                .cornerRadius(6)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(surfaceCardBorder, lineWidth: 1)
+                )
+            } else {
+                externalPlayerCard
             }
-            .frame(maxHeight: 110)
-            .background(surfaceCardColor)
-            .cornerRadius(6)
-            .overlay(
-                RoundedRectangle(cornerRadius: 6)
-                    .stroke(surfaceCardBorder, lineWidth: 1)
-            )
         }
         .padding(8)
         .background(surfaceCardColor.opacity(0.5))
@@ -426,6 +484,60 @@ struct PopoverContentView: View {
             RoundedRectangle(cornerRadius: 8)
                 .stroke(surfaceCardBorder, lineWidth: 1)
         )
+    }
+
+    private var externalPlayerCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            // Status row
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(audio.isExternalAppRunning ? Color(hex: 0x5CB85C) : secondaryTextColor.opacity(0.45))
+                    .frame(width: 7, height: 7)
+
+                Text("\(audio.musicProvider.displayName) \(isEn ? (audio.isExternalAppRunning ? "connected" : "not running") : (audio.isExternalAppRunning ? "conectado" : "cerrado"))")
+                    .font(monoFont(size: 9.5, weight: .semibold))
+                    .foregroundColor(primaryTextColor)
+            }
+
+            // Current track & artist summary
+            if let title = audio.externalTrackTitle, !title.isEmpty {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(monoFont(size: 10, weight: .bold))
+                        .foregroundColor(primaryTextColor)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+
+                    if let artist = audio.externalTrackArtist, !artist.isEmpty {
+                        Text(artist)
+                            .font(monoFont(size: 9))
+                            .foregroundColor(secondaryTextColor)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+                }
+            }
+
+            // Action button
+            Button(action: { audio.openActiveExternalApp() }) {
+                HStack(spacing: 5) {
+                    Image(systemName: "arrow.up.forward.app")
+                        .font(.system(size: 9.5))
+                    Text(isEn ? "Open \(audio.musicProvider.displayName)" : "Abrir \(audio.musicProvider.displayName)")
+                        .font(monoFont(size: 9.5, weight: .semibold))
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 5)
+                .background(surfaceCardColor)
+                .foregroundColor(primaryTextColor)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 5)
+                        .stroke(surfaceCardBorder, lineWidth: 1)
+                )
+                .cornerRadius(5)
+            }
+            .buttonStyle(.plain)
+        }
     }
 
     private func sourceFilterTitle(_ filter: MusicSourceFilter) -> String {

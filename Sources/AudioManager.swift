@@ -3,6 +3,30 @@ import AVFoundation
 import AppKit
 import Combine
 
+enum MusicPlayerProvider: String, CaseIterable, Identifiable {
+    case noel = "noel"
+    case spotify = "spotify"
+    case appleMusic = "appleMusic"
+
+    var id: String { rawValue }
+
+    var bundleIdentifier: String? {
+        switch self {
+        case .noel: return nil
+        case .spotify: return "com.spotify.client"
+        case .appleMusic: return "com.apple.Music"
+        }
+    }
+
+    var displayName: String {
+        switch self {
+        case .noel: return "Noël"
+        case .spotify: return "Spotify"
+        case .appleMusic: return "Apple Music"
+        }
+    }
+}
+
 enum MusicSourceFilter: String, CaseIterable, Identifiable {
     case all = "all"
     case customOnly = "customOnly"
@@ -67,7 +91,19 @@ final class AudioManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
         static let fireplaceVolume = "navidadbar.fireplaceVolume"
         static let isShuffle = "navidadbar.isShuffle"
         static let sourceFilter = "navidadbar.sourceFilter"
+        static let musicProvider = "noel.musicProvider"
     }
+
+    @Published var musicProvider: MusicPlayerProvider {
+        didSet {
+            UserDefaults.standard.set(musicProvider.rawValue, forKey: Keys.musicProvider)
+            handleProviderChanged(from: oldValue, to: musicProvider)
+        }
+    }
+
+    @Published private(set) var externalTrackTitle: String? = nil
+    @Published private(set) var externalTrackArtist: String? = nil
+    @Published private(set) var isExternalAppRunning: Bool = false
 
     @Published private(set) var allTracks: [Track] = []
     @Published private(set) var filteredTracks: [Track] = []
@@ -75,7 +111,17 @@ final class AudioManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
     @Published var isPlaying: Bool = false
 
     @Published var isShuffle: Bool {
-        didSet { UserDefaults.standard.set(isShuffle, forKey: Keys.isShuffle) }
+        didSet {
+            if musicProvider == .noel && !isUpdatingFromExternal {
+                UserDefaults.standard.set(isShuffle, forKey: Keys.isShuffle)
+            } else if !isUpdatingFromExternal, let bundleID = musicProvider.bundleIdentifier {
+                let shuffleProp = (musicProvider == .spotify) ? "shuffling" : "shuffle enabled"
+                let script = "tell application id \"\(bundleID)\" to set \(shuffleProp) to \(isShuffle)"
+                appleScriptQueue.async {
+                    NSAppleScript(source: script)?.executeAndReturnError(nil)
+                }
+            }
+        }
     }
 
     @Published var sourceFilter: MusicSourceFilter {
@@ -87,8 +133,18 @@ final class AudioManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
 
     @Published var musicVolume: Float {
         didSet {
-            UserDefaults.standard.set(musicVolume, forKey: Keys.musicVolume)
-            musicPlayer?.volume = musicVolume
+            if musicProvider == .noel {
+                if !isUpdatingFromExternal {
+                    UserDefaults.standard.set(musicVolume, forKey: Keys.musicVolume)
+                }
+                musicPlayer?.volume = musicVolume
+            } else if !isUpdatingFromExternal, let bundleID = musicProvider.bundleIdentifier {
+                let volInt = max(0, min(100, Int(musicVolume * 100)))
+                let script = "tell application id \"\(bundleID)\" to set sound volume to \(volInt)"
+                appleScriptQueue.async {
+                    NSAppleScript(source: script)?.executeAndReturnError(nil)
+                }
+            }
         }
     }
 
@@ -107,6 +163,10 @@ final class AudioManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
     private var fireplacePlayer: AVAudioPlayer?
     private let supportedExtensions: Set<String> = ["mp3", "m4a", "wav", "aac", "aiff", "flac"]
 
+    private var isUpdatingFromExternal = false
+    private var externalSyncTimer: Timer?
+    private let appleScriptQueue = DispatchQueue(label: "com.damiatorres.noel.applescript", qos: .userInitiated)
+
     private override init() {
         let defaults = UserDefaults.standard
         self.musicVolume = defaults.object(forKey: Keys.musicVolume) as? Float ?? 0.72
@@ -120,8 +180,234 @@ final class AudioManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
             self.sourceFilter = .all
         }
 
+        if let rawProvider = defaults.string(forKey: Keys.musicProvider),
+           let provider = MusicPlayerProvider(rawValue: rawProvider) {
+            self.musicProvider = provider
+        } else {
+            self.musicProvider = .noel
+        }
+
         super.init()
         reloadTracks()
+        setupDistributedNotifications()
+
+        if musicProvider != .noel {
+            startExternalSyncTimer()
+            syncExternalPlayerState()
+        }
+    }
+
+    private func handleProviderChanged(from old: MusicPlayerProvider, to new: MusicPlayerProvider) {
+        if old == .noel && new != .noel {
+            // Pause local music box while keeping hearth/fireplace untouched
+            musicPlayer?.pause()
+        }
+
+        if new == .noel {
+            // Restore local player state
+            isPlaying = (musicPlayer?.isPlaying == true)
+            isUpdatingFromExternal = true
+            musicVolume = UserDefaults.standard.object(forKey: Keys.musicVolume) as? Float ?? 0.72
+            isShuffle = UserDefaults.standard.object(forKey: Keys.isShuffle) as? Bool ?? false
+            isUpdatingFromExternal = false
+            externalTrackTitle = nil
+            externalTrackArtist = nil
+            isExternalAppRunning = false
+            stopExternalSyncTimer()
+        } else {
+            startExternalSyncTimer()
+            syncExternalPlayerState()
+        }
+    }
+
+    private func startExternalSyncTimer() {
+        stopExternalSyncTimer()
+        let timer = Timer(timeInterval: 2.5, repeats: true) { [weak self] _ in
+            self?.syncExternalPlayerState()
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        self.externalSyncTimer = timer
+    }
+
+    private func stopExternalSyncTimer() {
+        externalSyncTimer?.invalidate()
+        externalSyncTimer = nil
+    }
+
+    private func setupDistributedNotifications() {
+        let center = DistributedNotificationCenter.default()
+
+        center.addObserver(
+            self,
+            selector: #selector(handleSpotifyNotification(_:)),
+            name: NSNotification.Name("com.spotify.client.PlaybackStateChanged"),
+            object: nil
+        )
+
+        center.addObserver(
+            self,
+            selector: #selector(handleAppleMusicNotification(_:)),
+            name: NSNotification.Name("com.apple.Music.playerInfo"),
+            object: nil
+        )
+    }
+
+    @objc private func handleSpotifyNotification(_ notification: Notification) {
+        guard musicProvider == .spotify else { return }
+        handleExternalNotification(notification)
+    }
+
+    @objc private func handleAppleMusicNotification(_ notification: Notification) {
+        guard musicProvider == .appleMusic else { return }
+        handleExternalNotification(notification)
+    }
+
+    private func handleExternalNotification(_ notification: Notification) {
+        guard let info = notification.userInfo else { return }
+        let stateStr = (info["Player State"] as? String) ?? ""
+        let nameStr = (info["Name"] as? String) ?? ""
+        let artistStr = (info["Artist"] as? String) ?? ""
+
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            let isPlay = stateStr.caseInsensitiveCompare("Playing") == .orderedSame
+            self.isPlaying = isPlay
+            self.externalTrackTitle = nameStr.isEmpty ? nil : nameStr
+            self.externalTrackArtist = artistStr.isEmpty ? nil : artistStr
+            self.isExternalAppRunning = true
+        }
+    }
+
+    func syncExternalPlayerState() {
+        guard let bundleID = musicProvider.bundleIdentifier else { return }
+
+        appleScriptQueue.async { [weak self] in
+            guard let self = self else { return }
+
+            let isRunning = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first != nil
+            guard isRunning else {
+                DispatchQueue.main.async {
+                    guard self.musicProvider.bundleIdentifier == bundleID else { return }
+                    self.isExternalAppRunning = false
+                    self.isPlaying = false
+                    self.externalTrackTitle = nil
+                    self.externalTrackArtist = nil
+                }
+                return
+            }
+
+            let scriptSource: String
+            if self.musicProvider == .spotify {
+                scriptSource = """
+                tell application id "com.spotify.client"
+                    set pState to player state as string
+                    set tName to ""
+                    set tArtist to ""
+                    try
+                        set tName to name of current track
+                    end try
+                    try
+                        set tArtist to artist of current track
+                    end try
+                    set sVol to sound volume
+                    set sShuffle to shuffling
+                    return pState & "|||NOEL_SEP|||" & tName & "|||NOEL_SEP|||" & tArtist & "|||NOEL_SEP|||" & (sVol as string) & "|||NOEL_SEP|||" & (sShuffle as string)
+                end tell
+                """
+            } else {
+                scriptSource = """
+                tell application id "com.apple.Music"
+                    set pState to player state as string
+                    set tName to ""
+                    set tArtist to ""
+                    try
+                        set tName to name of current track
+                    end try
+                    try
+                        set tArtist to artist of current track
+                    end try
+                    set sVol to sound volume
+                    set sShuffle to shuffle enabled
+                    return pState & "|||NOEL_SEP|||" & tName & "|||NOEL_SEP|||" & tArtist & "|||NOEL_SEP|||" & (sVol as string) & "|||NOEL_SEP|||" & (sShuffle as string)
+                end tell
+                """
+            }
+
+            var errorInfo: NSDictionary?
+            let appleScript = NSAppleScript(source: scriptSource)
+            let resultDescriptor = appleScript?.executeAndReturnError(&errorInfo)
+
+            guard let output = resultDescriptor?.stringValue else { return }
+            let parts = output.components(separatedBy: "|||NOEL_SEP|||")
+            guard parts.count >= 5 else { return }
+
+            let pState = parts[0].trimmingCharacters(in: .whitespacesAndNewlines)
+            let tName = parts[1].trimmingCharacters(in: .whitespacesAndNewlines)
+            let tArtist = parts[2].trimmingCharacters(in: .whitespacesAndNewlines)
+            let sVol = Float(parts[3].trimmingCharacters(in: .whitespacesAndNewlines)) ?? 70.0
+            let sShuffle = parts[4].trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "true"
+
+            let isNowPlaying = pState.caseInsensitiveCompare("playing") == .orderedSame || pState.lowercased().contains("play")
+            let normalizedVolume = max(0.0, min(1.0, sVol / 100.0))
+
+            DispatchQueue.main.async {
+                guard self.musicProvider.bundleIdentifier == bundleID else { return }
+                self.isExternalAppRunning = true
+                self.isPlaying = isNowPlaying
+                self.externalTrackTitle = tName.isEmpty ? nil : tName
+                self.externalTrackArtist = tArtist.isEmpty ? nil : tArtist
+
+                self.isUpdatingFromExternal = true
+                self.musicVolume = normalizedVolume
+                self.isShuffle = sShuffle
+                self.isUpdatingFromExternal = false
+            }
+        }
+    }
+
+    func openActiveExternalApp() {
+        guard let bundleID = musicProvider.bundleIdentifier else { return }
+        if let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) {
+            let config = NSWorkspace.OpenConfiguration()
+            config.activates = true
+            NSWorkspace.shared.openApplication(at: appURL, configuration: config, completionHandler: nil)
+        }
+    }
+
+    var displayTrackTitle: String {
+        let isEN = AppState.shared.language == .en
+        switch musicProvider {
+        case .noel:
+            if let current = currentTrack {
+                return current.localizedTitle
+            }
+            return isEN ? "No music selected" : "Sin música seleccionada"
+        case .spotify, .appleMusic:
+            if let title = externalTrackTitle, !title.isEmpty {
+                return title
+            }
+            if isExternalAppRunning {
+                return isEN ? "\(musicProvider.displayName) — Ready" : "\(musicProvider.displayName) — Listo"
+            } else {
+                return isEN ? "\(musicProvider.displayName) not running" : "\(musicProvider.displayName) no abierto"
+            }
+        }
+    }
+
+    var displayTrackSubtitle: String {
+        let isEN = AppState.shared.language == .en
+        switch musicProvider {
+        case .noel:
+            if currentTrack != nil {
+                return isEN ? "Noël Music Box" : "Caja de música Noël"
+            }
+            return isEN ? "Built-in / Local MP3" : "Integradas / Mis MP3"
+        case .spotify, .appleMusic:
+            if let artist = externalTrackArtist, !artist.isEmpty {
+                return artist
+            }
+            return musicProvider.displayName
+        }
     }
 
     func reloadTracks() {
@@ -273,26 +559,66 @@ final class AudioManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
     // MARK: - Playback Controls
 
     func togglePlayPause() {
-        if isPlaying {
-            musicPlayer?.pause()
-            isPlaying = false
+        if musicProvider == .noel {
+            if isPlaying {
+                musicPlayer?.pause()
+                isPlaying = false
+                return
+            }
+
+            if let player = musicPlayer, currentTrack != nil {
+                player.volume = musicVolume
+                if player.play() {
+                    isPlaying = true
+                    return
+                }
+            }
+
+            if let track = currentTrack ?? filteredTracks.first ?? allTracks.first {
+                playTrack(track)
+            }
             return
         }
 
-        if let player = musicPlayer, currentTrack != nil {
-            player.volume = musicVolume
-            if player.play() {
-                isPlaying = true
-                return
+        // Spotify / Apple Music
+        guard let bundleID = musicProvider.bundleIdentifier else { return }
+        let isRunning = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first != nil
+
+        if !isRunning {
+            if let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) {
+                let config = NSWorkspace.OpenConfiguration()
+                config.activates = false
+                NSWorkspace.shared.openApplication(at: appURL, configuration: config) { [weak self] _, _ in
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                        self?.appleScriptQueue.async {
+                            let playScript = "tell application id \"\(bundleID)\" to play"
+                            NSAppleScript(source: playScript)?.executeAndReturnError(nil)
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                                self?.syncExternalPlayerState()
+                            }
+                        }
+                    }
+                }
             }
+            return
         }
 
-        if let track = currentTrack ?? filteredTracks.first ?? allTracks.first {
-            playTrack(track)
+        // Running: flip isPlaying optimistically and send playpause
+        isPlaying.toggle()
+        appleScriptQueue.async { [weak self] in
+            let script = "tell application id \"\(bundleID)\" to playpause"
+            NSAppleScript(source: script)?.executeAndReturnError(nil)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                self?.syncExternalPlayerState()
+            }
         }
     }
 
     func playTrack(_ track: Track) {
+        if musicProvider != .noel {
+            musicProvider = .noel
+        }
+
         currentTrack = track
         musicPlayer?.stop()
         musicPlayer = nil
@@ -319,12 +645,24 @@ final class AudioManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
                 self.isPlaying = false
             }
         } catch {
-            NSLog("NavidadBar audio error: \(error.localizedDescription)")
+            NSLog("Noël audio error: \(error.localizedDescription)")
             self.isPlaying = false
         }
     }
 
     func nextTrack() {
+        if musicProvider != .noel {
+            guard let bundleID = musicProvider.bundleIdentifier else { return }
+            appleScriptQueue.async { [weak self] in
+                let script = "tell application id \"\(bundleID)\" to next track"
+                NSAppleScript(source: script)?.executeAndReturnError(nil)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                    self?.syncExternalPlayerState()
+                }
+            }
+            return
+        }
+
         let list = activePlaylist()
         guard !list.isEmpty else { return }
 
@@ -345,6 +683,18 @@ final class AudioManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
     }
 
     func previousTrack() {
+        if musicProvider != .noel {
+            guard let bundleID = musicProvider.bundleIdentifier else { return }
+            appleScriptQueue.async { [weak self] in
+                let script = "tell application id \"\(bundleID)\" to previous track"
+                NSAppleScript(source: script)?.executeAndReturnError(nil)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                    self?.syncExternalPlayerState()
+                }
+            }
+            return
+        }
+
         let list = activePlaylist()
         guard !list.isEmpty else { return }
 
@@ -402,7 +752,7 @@ final class AudioManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
                 isFireplacePlaying = true
             }
         } catch {
-            NSLog("NavidadBar fireplace error: \(error.localizedDescription)")
+            NSLog("Noël fireplace error: \(error.localizedDescription)")
             isFireplacePlaying = false
         }
     }

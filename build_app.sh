@@ -56,6 +56,8 @@ cat << 'EOF' > "${CONTENTS_DIR}/Info.plist"
     <true/>
     <key>NSHighResolutionCapable</key>
     <true/>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>Noël necesita permiso para mostrar la canción actual y controlar la reproducción en Spotify y Apple Music.</string>
 </dict>
 </plist>
 EOF
@@ -70,7 +72,7 @@ echo "==> Calculando SHA-256 de Noel.zip..."
 shasum -a 256 Noel.zip
 
 echo "================================================="
-echo "✅ Aplicación Noël y Noel.zip listos para distribución:"
+echo "==> Aplicación Noël y Noel.zip listos para distribución:"
 echo "   App: $(pwd)/${APP_BUNDLE}"
 echo "   Zip: $(pwd)/Noel.zip"
 echo "================================================="

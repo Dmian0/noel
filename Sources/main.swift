@@ -118,11 +118,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         lines.append("\(AppState.shared.appTitle) — \(AppState.shared.countdownLongText())")
 
         // Línea 2: Estado de música
-        if let track = AudioManager.shared.currentTrack {
-            let status = isPlaying ? (isEN ? "Playing" : "Reproduciendo") : (isEN ? "Paused" : "En pausa")
-            lines.append("\(status): \(track.localizedTitle)")
+        let trackTitle = AudioManager.shared.displayTrackTitle
+        if AudioManager.shared.musicProvider == .noel && AudioManager.shared.currentTrack == nil {
+            lines.append(trackTitle)
         } else {
-            lines.append(isEN ? "No music selected" : "Sin música seleccionada")
+            let status = isPlaying ? (isEN ? "Playing" : "Reproduciendo") : (isEN ? "Paused" : "En pausa")
+            lines.append("\(status): \(trackTitle)")
         }
 
         // Línea 3: Instrucciones limpias
