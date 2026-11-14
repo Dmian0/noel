@@ -5,7 +5,7 @@
 **Reproductor navideño artesanal para la barra de menú de macOS · An artisanal holiday companion for the macOS menu bar.**
 
 <p>
-  <a href="https://github.com/Dmian0/noel/releases/tag/v1.0.0"><img src="https://img.shields.io/badge/release-v1.0.0-B84237.svg?style=flat-square" alt="Release v1.0.0" /></a>
+  <a href="https://github.com/Dmian0/noel/releases/tag/v1.0.1"><img src="https://img.shields.io/badge/release-v1.0.1-B84237.svg?style=flat-square" alt="Release v1.0.1" /></a>
   <img src="https://img.shields.io/badge/macOS-13%2B%20Ventura-1B3022.svg?style=flat-square" alt="macOS 13+ Ventura" />
   <img src="https://img.shields.io/badge/Swift-5.9%20%7C%20SwiftUI-D4AF37.svg?style=flat-square" alt="Swift 5.9 | SwiftUI" />
   <a href="https://github.com/Dmian0/homebrew-noel"><img src="https://img.shields.io/badge/homebrew-Dmian0%2Fnoel-1B3022.svg?style=flat-square" alt="Homebrew Cask" /></a>
@@ -40,6 +40,7 @@
 ```bash
 brew install --cask Dmian0/noel/noel
 ```
+*Para actualizar a una nueva versión / To upgrade:* `brew update && brew upgrade --cask noel`
 
 **Terminal (`curl` 1-liner):**
 
@@ -100,6 +101,12 @@ Descarga [Noel.zip](https://github.com/Dmian0/noel/releases/latest/download/Noel
 
 ### Características Principales
 
+- **Integración con Spotify y Apple Music:**  
+  Selector `NOËL | SPOTIFY | APPLE MUSIC` para sincronizar en tiempo real la canción y el artista activos y controlar reproducción, pista siguiente/anterior, modo aleatorio y volumen, manteniendo independiente el sonido de chimenea.
+
+- **Soporte Multipantalla:**  
+  Selector de pantallas (`Todas` / `Principal`) que extiende la nevada y las guirnaldas de luces a todos los monitores conectados, escalando dinámicamente la cantidad de copos y bombillas según el ancho de cada pantalla.
+
 - **Audio Procedural en Tiempo Real:**  
   Cinco villancicos clásicos sintetizados nota a nota mediante síntesis de ondas (*Jingle Bells*, *We Wish You a Merry Christmas*, *Noche de Paz / Silent Night*, *Deck the Halls*, *Carol of the Bells*). Generador continuo de chimenea con 12 segundos de audio procedimental con algoritmos estocásticos para emular el crujido y las chispas de la madera, sin muestras pregrabadas ni consumo de red. Compatibilidad total con bibliotecas locales de audio en formatos MP3, M4A, WAV y FLAC.
 
@@ -128,6 +135,12 @@ Descarga [Noel.zip](https://github.com/Dmian0/noel/releases/latest/download/Noel
 
 <a id="features"></a>
 ### Key Features
+
+- **Native Spotify & Apple Music Integration:**  
+  Source selector (`NOËL | SPOTIFY | APPLE MUSIC`) to sync the active track and artist in real time and control Play/Pause, Next, Previous, Shuffle, and Volume while keeping procedural fireplace hearth audio independent.
+
+- **Multi-Display Support:**  
+  Display target selector (`All` / `Main`) extending falling snow and top holiday lights across all connected monitors, dynamically scaling snowflake density and light bulb counts to each screen's width.
 
 - **Procedural Audio Synthesis:**  
   Five holiday tunes synthesized in real time (*Jingle Bells*, *We Wish You a Merry Christmas*, *Silent Night*, *Deck the Halls*, *Carol of the Bells*). Loopable 12-second procedural fireplace audio generating wood-burning crackles, pops, and warm low-frequency embers through stochastic algorithms without audio samples or network calls. Full support for local audio folders containing MP3, M4A, WAV, or FLAC tracks.
