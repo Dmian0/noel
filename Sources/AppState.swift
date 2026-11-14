@@ -156,6 +156,24 @@ enum SnowIntensityOption: Double, CaseIterable, Identifiable {
     }
 }
 
+enum ScreenTargetMode: String, CaseIterable, Identifiable {
+    case allScreens = "allScreens"
+    case mainOnly = "mainOnly"
+
+    var id: String { rawValue }
+
+    func displayName(in lang: AppLanguage) -> String {
+        switch self {
+        case .allScreens: return lang == .en ? "All" : "Todas"
+        case .mainOnly: return lang == .en ? "Main Only" : "Principal"
+        }
+    }
+
+    var displayName: String {
+        displayName(in: AppState.shared.language)
+    }
+}
+
 final class AppState: ObservableObject {
     static let shared = AppState()
 
@@ -172,6 +190,7 @@ final class AppState: ObservableObject {
         static let themeMode = "noel.themeMode"
         static let fontStyle = "noel.fontStyle"
         static let language = "noel.language"
+        static let screenTargetMode = "noel.screenTargetMode"
     }
 
     static var languageStorageKey: String {
@@ -243,6 +262,13 @@ final class AppState: ObservableObject {
         didSet { UserDefaults.standard.set(customMusicFolderPath, forKey: Keys.customMusicFolderPath) }
     }
 
+    @Published var screenTargetMode: ScreenTargetMode {
+        didSet {
+            UserDefaults.standard.set(screenTargetMode.rawValue, forKey: Keys.screenTargetMode)
+            DispatchQueue.main.async { ScreenEffectsManager.shared.syncWithState() }
+        }
+    }
+
     private init() {
         let defaults = UserDefaults.standard
 
@@ -305,6 +331,13 @@ final class AppState: ObservableObject {
         }
 
         self.customMusicFolderPath = defaults.string(forKey: Keys.customMusicFolderPath)
+
+        if let rawScreenMode = defaults.string(forKey: Keys.screenTargetMode),
+           let mode = ScreenTargetMode(rawValue: rawScreenMode) {
+            self.screenTargetMode = mode
+        } else {
+            self.screenTargetMode = .allScreens
+        }
     }
 
     func countdownToChristmas(from now: Date = Date()) -> (days: Int, hours: Int, isChristmasToday: Bool) {

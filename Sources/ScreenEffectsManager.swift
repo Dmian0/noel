@@ -4,11 +4,8 @@ import AppKit
 final class ScreenEffectsManager {
     static let shared = ScreenEffectsManager()
 
-    private var snowWindow: NSWindow?
-    private var snowView: SnowOverlayView?
-
-    private var lightsWindow: NSWindow?
-    private var lightsView: LightsOverlayView?
+    private var snowEntries: [CGDirectDisplayID: (window: NSWindow, view: SnowOverlayView)] = [:]
+    private var lightsEntries: [CGDirectDisplayID: (window: NSWindow, view: LightsOverlayView)] = [:]
 
     private init() {
         NotificationCenter.default.addObserver(
@@ -25,95 +22,144 @@ final class ScreenEffectsManager {
 
     func syncWithState() {
         let state = AppState.shared
-        updateSnow(enabled: state.isSnowing, intensity: state.snowIntensity)
-        updateLights(enabled: state.showTopLights, pattern: state.lightsPattern)
+        updateSnow(enabled: state.isSnowing, intensity: state.snowIntensity, screenMode: state.screenTargetMode)
+        updateLights(enabled: state.showTopLights, pattern: state.lightsPattern, screenMode: state.screenTargetMode)
     }
 
-    private func primaryScreen() -> NSScreen? {
-        return NSScreen.screens.first ?? NSScreen.main
+    private func targetScreens(for mode: ScreenTargetMode) -> [(id: CGDirectDisplayID, screen: NSScreen)] {
+        let screens: [NSScreen]
+        switch mode {
+        case .allScreens:
+            screens = NSScreen.screens
+        case .mainOnly:
+            if let first = NSScreen.screens.first ?? NSScreen.main {
+                screens = [first]
+            } else {
+                screens = []
+            }
+        }
+
+        var result: [(id: CGDirectDisplayID, screen: NSScreen)] = []
+        for screen in screens {
+            if let id = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID {
+                result.append((id: id, screen: screen))
+            } else if screen == NSScreen.main {
+                result.append((id: CGMainDisplayID(), screen: screen))
+            }
+        }
+        return result
     }
 
     // MARK: - Snow Overlay
 
-    private func updateSnow(enabled: Bool, intensity: Double) {
+    private func updateSnow(enabled: Bool, intensity: Double, screenMode: ScreenTargetMode) {
         if !enabled {
-            snowView?.stop()
-            snowWindow?.orderOut(nil)
+            for (_, entry) in snowEntries {
+                entry.view.stop()
+                entry.window.orderOut(nil)
+            }
+            snowEntries.removeAll()
             return
         }
 
-        guard let screen = primaryScreen() else { return }
-        let frame = screen.frame
+        let targets = targetScreens(for: screenMode)
+        let activeIDs = Set(targets.map { $0.id })
 
-        if snowWindow == nil {
-            let win = NSWindow(
-                contentRect: frame,
-                styleMask: [.borderless],
-                backing: .buffered,
-                defer: false
-            )
-            win.isOpaque = false
-            win.backgroundColor = .clear
-            win.hasShadow = false
-            win.ignoresMouseEvents = true
-            win.level = .floating
-            win.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
-
-            let view = SnowOverlayView(frame: NSRect(origin: .zero, size: frame.size))
-            win.contentView = view
-            self.snowWindow = win
-            self.snowView = view
-        } else {
-            snowWindow?.setFrame(frame, display: true)
-            snowView?.frame = NSRect(origin: .zero, size: frame.size)
+        for (id, entry) in snowEntries where !activeIDs.contains(id) {
+            entry.view.stop()
+            entry.window.orderOut(nil)
+            snowEntries.removeValue(forKey: id)
         }
 
-        snowView?.setIntensity(intensity)
-        snowView?.start()
-        snowWindow?.orderFrontRegardless()
+        for (id, screen) in targets {
+            let frame = screen.frame
+            if let entry = snowEntries[id] {
+                entry.window.setFrame(frame, display: true)
+                entry.view.frame = NSRect(origin: .zero, size: frame.size)
+                entry.view.setIntensity(intensity)
+                entry.view.start()
+                entry.window.orderFrontRegardless()
+            } else {
+                let win = NSWindow(
+                    contentRect: frame,
+                    styleMask: [.borderless],
+                    backing: .buffered,
+                    defer: false
+                )
+                win.isOpaque = false
+                win.backgroundColor = .clear
+                win.hasShadow = false
+                win.ignoresMouseEvents = true
+                win.level = .floating
+                win.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+
+                let view = SnowOverlayView(frame: NSRect(origin: .zero, size: frame.size))
+                win.contentView = view
+                view.setIntensity(intensity)
+                view.start()
+                win.orderFrontRegardless()
+
+                snowEntries[id] = (window: win, view: view)
+            }
+        }
     }
 
     // MARK: - Top Lights Garland Overlay
 
-    private func updateLights(enabled: Bool, pattern: LightsPattern) {
+    private func updateLights(enabled: Bool, pattern: LightsPattern, screenMode: ScreenTargetMode) {
         if !enabled {
-            lightsView?.stop()
-            lightsWindow?.orderOut(nil)
+            for (_, entry) in lightsEntries {
+                entry.view.stop()
+                entry.window.orderOut(nil)
+            }
+            lightsEntries.removeAll()
             return
         }
 
-        guard let screen = primaryScreen() else { return }
-        let garlandHeight: CGFloat = 34.0
-        let menuBarHeight = max(screen.frame.maxY - screen.visibleFrame.maxY, NSStatusBar.system.thickness)
-        let garlandY = screen.frame.maxY - menuBarHeight - garlandHeight
-        let frame = NSRect(x: screen.frame.minX, y: garlandY, width: screen.frame.width, height: garlandHeight)
+        let targets = targetScreens(for: screenMode)
+        let activeIDs = Set(targets.map { $0.id })
 
-        if lightsWindow == nil {
-            let win = NSWindow(
-                contentRect: frame,
-                styleMask: [.borderless],
-                backing: .buffered,
-                defer: false
-            )
-            win.isOpaque = false
-            win.backgroundColor = .clear
-            win.hasShadow = false
-            win.ignoresMouseEvents = true
-            win.level = .floating
-            win.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
-
-            let view = LightsOverlayView(frame: NSRect(origin: .zero, size: frame.size))
-            win.contentView = view
-            self.lightsWindow = win
-            self.lightsView = view
-        } else {
-            lightsWindow?.setFrame(frame, display: true)
-            lightsView?.frame = NSRect(origin: .zero, size: frame.size)
+        for (id, entry) in lightsEntries where !activeIDs.contains(id) {
+            entry.view.stop()
+            entry.window.orderOut(nil)
+            lightsEntries.removeValue(forKey: id)
         }
 
-        lightsView?.pattern = pattern
-        lightsView?.start()
-        lightsWindow?.orderFrontRegardless()
+        let garlandHeight: CGFloat = 34.0
+        for (id, screen) in targets {
+            let menuBarHeight = max(screen.frame.maxY - screen.visibleFrame.maxY, NSStatusBar.system.thickness)
+            let garlandY = screen.frame.maxY - menuBarHeight - garlandHeight
+            let frame = NSRect(x: screen.frame.minX, y: garlandY, width: screen.frame.width, height: garlandHeight)
+
+            if let entry = lightsEntries[id] {
+                entry.window.setFrame(frame, display: true)
+                entry.view.frame = NSRect(origin: .zero, size: frame.size)
+                entry.view.pattern = pattern
+                entry.view.start()
+                entry.window.orderFrontRegardless()
+            } else {
+                let win = NSWindow(
+                    contentRect: frame,
+                    styleMask: [.borderless],
+                    backing: .buffered,
+                    defer: false
+                )
+                win.isOpaque = false
+                win.backgroundColor = .clear
+                win.hasShadow = false
+                win.ignoresMouseEvents = true
+                win.level = .floating
+                win.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+
+                let view = LightsOverlayView(frame: NSRect(origin: .zero, size: frame.size))
+                win.contentView = view
+                view.pattern = pattern
+                view.start()
+                win.orderFrontRegardless()
+
+                lightsEntries[id] = (window: win, view: view)
+            }
+        }
     }
 }
 

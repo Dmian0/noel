@@ -840,6 +840,37 @@ struct PopoverContentView: View {
                     .buttonStyle(.plain)
                 }
             }
+
+            // Displays selector
+            HStack {
+                Text(isEn ? "DISPLAYS" : "PANTALLAS")
+                    .font(monoFont(size: 9, weight: .bold))
+                    .foregroundColor(secondaryTextColor)
+                Spacer()
+                HStack(spacing: 4) {
+                    Button(action: { state.screenTargetMode = .allScreens }) {
+                        Text(isEn ? "All" : "Todas")
+                            .font(monoFont(size: 9, weight: state.screenTargetMode == .allScreens ? .bold : .regular))
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3)
+                            .background(state.screenTargetMode == .allScreens ? (isDark ? Color(hex: 0xF4EFE6).opacity(0.15) : Color(hex: 0x1D3B2E)) : surfaceCardColor)
+                            .foregroundColor(state.screenTargetMode == .allScreens ? (isDark ? Color(hex: 0xF4EFE6) : Color(hex: 0xF6F0E4)) : secondaryTextColor)
+                            .cornerRadius(4)
+                    }
+                    .buttonStyle(.plain)
+
+                    Button(action: { state.screenTargetMode = .mainOnly }) {
+                        Text(isEn ? "Main Only" : "Principal")
+                            .font(monoFont(size: 9, weight: state.screenTargetMode == .mainOnly ? .bold : .regular))
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3)
+                            .background(state.screenTargetMode == .mainOnly ? (isDark ? Color(hex: 0xF4EFE6).opacity(0.15) : Color(hex: 0x1D3B2E)) : surfaceCardColor)
+                            .foregroundColor(state.screenTargetMode == .mainOnly ? (isDark ? Color(hex: 0xF4EFE6) : Color(hex: 0xF6F0E4)) : secondaryTextColor)
+                            .cornerRadius(4)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
         }
         .padding(8)
         .background(surfaceCardColor)
