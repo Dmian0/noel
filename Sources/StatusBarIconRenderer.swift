@@ -3,6 +3,20 @@ import AppKit
 /// Renders animated colorful 3D and Pixel Art icons for the macOS menu bar and popover preview.
 enum StatusBarIconRenderer {
 
+    private struct IconCacheKey: Hashable {
+        let character: CharacterType
+        let style: IconStyle
+        let isPlaying: Bool
+        let isRotating: Bool
+        let step: Int
+        let width: Int
+        let height: Int
+    }
+
+    private static var iconCache: [IconCacheKey: NSImage] = [:]
+    private static var cachedChar: CharacterType?
+    private static var cachedStyle: IconStyle?
+
     static func render(
         character: CharacterType,
         style: IconStyle,
@@ -12,37 +26,116 @@ enum StatusBarIconRenderer {
         isRotating: Bool,
         size: NSSize = NSSize(width: 22, height: 22)
     ) -> NSImage {
-        let effectivePhase = isRotating ? phase : 0.35
-        let image = NSImage(size: size, flipped: false) { rect in
-            guard let ctx = NSGraphicsContext.current?.cgContext else { return false }
-            ctx.saveGState()
-            ctx.scaleBy(x: rect.width / 22.0, y: rect.height / 22.0)
+        let twoPi = 2.0 * Double.pi
 
-            switch style {
-            case .colorful:
-                NSGraphicsContext.current?.shouldAntialias = true
-                drawColorful(
-                    character: character,
-                    phase: effectivePhase,
-                    twinklePhase: twinklePhase,
-                    isPlaying: isPlaying,
-                    in: ctx
-                )
-            case .pixelArt:
-                NSGraphicsContext.current?.shouldAntialias = false
-                drawPixelArt(
-                    character: character,
-                    phase: effectivePhase,
-                    twinklePhase: twinklePhase,
-                    isPlaying: isPlaying
-                )
-            }
+        var normPhase = phase.truncatingRemainder(dividingBy: twoPi)
+        if normPhase < 0 { normPhase += twoPi }
 
-            ctx.restoreGState()
-            return true
+        var normTwinkle = twinklePhase.truncatingRemainder(dividingBy: twoPi)
+        if normTwinkle < 0 { normTwinkle += twoPi }
+
+        let step: Int
+        let qPhase: Double
+        let qTwinkle: Double
+
+        if isRotating {
+            step = Int((normPhase / twoPi) * 48.0) % 48
+            qPhase = Double(step) * (twoPi / 48.0)
+            qTwinkle = qPhase * 2.0
+        } else {
+            step = Int((normTwinkle / twoPi) * 24.0) % 24
+            qPhase = 0.35
+            qTwinkle = Double(step) * (twoPi / 24.0)
         }
-        image.isTemplate = false
-        return image
+
+        if cachedChar != character || cachedStyle != style {
+            iconCache.removeAll()
+            cachedChar = character
+            cachedStyle = style
+        }
+        if iconCache.count > 96 {
+            iconCache.removeAll()
+        }
+
+        let wInt = max(1, Int(round(size.width)))
+        let hInt = max(1, Int(round(size.height)))
+        let key = IconCacheKey(
+            character: character,
+            style: style,
+            isPlaying: isPlaying,
+            isRotating: isRotating,
+            step: step,
+            width: wInt,
+            height: hInt
+        )
+
+        if let cached = iconCache[key] {
+            return cached
+        }
+
+        let scale = 2
+        let pw = max(1, wInt * scale)
+        let ph = max(1, hInt * scale)
+
+        guard let rep = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: pw,
+            pixelsHigh: ph,
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: pw * 4,
+            bitsPerPixel: 32
+        ) else {
+            return NSImage(size: size)
+        }
+
+        let prevCtx = NSGraphicsContext.current
+        guard let nsCtx = NSGraphicsContext(bitmapImageRep: rep) else {
+            return NSImage(size: size)
+        }
+        NSGraphicsContext.current = nsCtx
+
+        let ctx = nsCtx.cgContext
+        ctx.saveGState()
+        ctx.scaleBy(
+            x: CGFloat(pw) / 22.0,
+            y: CGFloat(ph) / 22.0
+        )
+
+        switch style {
+        case .colorful:
+            nsCtx.shouldAntialias = true
+            drawColorful(
+                character: character,
+                phase: qPhase,
+                twinklePhase: qTwinkle,
+                isPlaying: isPlaying,
+                in: ctx
+            )
+        case .pixelArt:
+            nsCtx.shouldAntialias = false
+            drawPixelArt(
+                character: character,
+                phase: qPhase,
+                twinklePhase: qTwinkle,
+                isPlaying: isPlaying
+            )
+        }
+
+        ctx.restoreGState()
+        NSGraphicsContext.current = prevCtx
+
+        rep.size = size
+
+        let img = NSImage(size: size)
+        img.addRepresentation(rep)
+        img.isTemplate = false
+
+        iconCache[key] = img
+        return img
     }
 
     // MARK: - Colorful 3D Vector Rendering (22x22 logical canvas)

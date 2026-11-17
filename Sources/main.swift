@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import QuartzCore
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
@@ -8,6 +9,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var phase: Double = 0.0
     private var twinklePhase: Double = 0.0
+
+    private var lastToolTipUpdate: TimeInterval = 0
+    private var lastCountdownText: String = ""
+    private var lastThemeMode: AppThemeMode? = nil
+    private var lastRenderedCharacter: CharacterType? = nil
+    private var lastRenderedStyle: IconStyle? = nil
+    private var lastRenderedIsPlaying: Bool? = nil
+    private var lastRenderedPausedForCall: Bool? = nil
+    private var idleRenderTickCounter: Int = 0
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // App de barra de menú sin icono en el Dock
@@ -84,30 +94,78 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func updateStatusBar() {
-        guard let button = statusItem?.button else { return }
+        autoreleasepool {
+            guard let button = statusItem?.button else { return }
 
-        let isPlaying = AudioManager.shared.isPlaying
-        let shouldRotate = (AppState.shared.animationMode == .always) || isPlaying
+            let currentCharacter = AppState.shared.selectedCharacter
+            let currentStyle = AppState.shared.iconStyle
+            let isPlaying = AudioManager.shared.isPlaying
+            let isPausedForCall = AppState.shared.isEffectsPausedForCall
+            let shouldRotate = (AppState.shared.animationMode == .always) || isPlaying
 
-        button.image = StatusBarIconRenderer.render(
-            character: AppState.shared.selectedCharacter,
-            style: AppState.shared.iconStyle,
-            phase: phase,
-            twinklePhase: twinklePhase,
-            isPlaying: isPlaying,
-            isRotating: shouldRotate,
-            size: NSSize(width: 22, height: 22)
-        )
+            let pauseChanged = (isPausedForCall != lastRenderedPausedForCall)
+            let stateChanged = (currentCharacter != lastRenderedCharacter)
+                || (currentStyle != lastRenderedStyle)
+                || (isPlaying != lastRenderedIsPlaying)
+                || pauseChanged
 
-        if AppState.shared.showCountdownInMenuBar {
-            button.title = " " + AppState.shared.countdownShortText().lowercased()
-            button.font = NSFont.monospacedDigitSystemFont(ofSize: 11.5, weight: .medium)
-        } else {
-            button.title = ""
+            button.alphaValue = isPausedForCall ? 0.55 : 1.0
+
+            let shouldRender: Bool
+            if shouldRotate || stateChanged {
+                shouldRender = true
+            } else {
+                shouldRender = (idleRenderTickCounter % 3 == 0)
+                idleRenderTickCounter += 1
+            }
+
+            if shouldRender {
+                button.image = StatusBarIconRenderer.render(
+                    character: currentCharacter,
+                    style: currentStyle,
+                    phase: phase,
+                    twinklePhase: twinklePhase,
+                    isPlaying: isPlaying,
+                    isRotating: shouldRotate,
+                    size: NSSize(width: 22, height: 22)
+                )
+                lastRenderedCharacter = currentCharacter
+                lastRenderedStyle = currentStyle
+            }
+
+            let newTitle: String
+            if AppState.shared.showCountdownInMenuBar {
+                let countdown = AppState.shared.countdownShortText().lowercased()
+                newTitle = " " + countdown
+                lastCountdownText = countdown
+            } else {
+                newTitle = ""
+                lastCountdownText = ""
+            }
+
+            if button.title != newTitle {
+                button.title = newTitle
+                if !newTitle.isEmpty {
+                    button.font = NSFont.monospacedDigitSystemFont(ofSize: 11.5, weight: .medium)
+                }
+            }
+
+            let currentTheme = AppState.shared.themeMode
+            if lastThemeMode != currentTheme {
+                syncPopoverAppearance()
+                lastThemeMode = currentTheme
+            }
+
+            let now = CACurrentMediaTime()
+            let playingChanged = (isPlaying != lastRenderedIsPlaying)
+            if button.toolTip == nil || playingChanged || pauseChanged || (now - lastToolTipUpdate >= 2.0) {
+                button.toolTip = buildToolTip(isPlaying: isPlaying)
+                lastToolTipUpdate = now
+            }
+
+            lastRenderedIsPlaying = isPlaying
+            lastRenderedPausedForCall = isPausedForCall
         }
-
-        syncPopoverAppearance()
-        button.toolTip = buildToolTip(isPlaying: isPlaying)
     }
 
     private func buildToolTip(isPlaying: Bool) -> String {
@@ -116,6 +174,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Línea 1: Título de la app y cuenta atrás limpia
         lines.append("\(AppState.shared.appTitle) — \(AppState.shared.countdownLongText())")
+
+        if AppState.shared.isEffectsPausedForCall {
+            lines.append(isEN ? "Screen effects paused (Meeting Mode)" : "Efectos en pausa (Modo Llamada)")
+        }
 
         // Línea 2: Estado de música
         let trackTitle = AudioManager.shared.displayTrackTitle
@@ -127,7 +189,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         // Línea 3: Instrucciones limpias
-        lines.append(isEN ? "Left-click: Panel · Right-click: Play/Pause" : "Clic izq: Panel · Clic der: Play/Pause")
+        lines.append(isEN ? "Left: Panel · Right: Play · Opt+Click: Pause effects" : "Clic izq: Panel · Clic der: Play · Opt+Clic: Pausar efectos")
 
         return lines.joined(separator: "\n")
     }
@@ -135,6 +197,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func statusBarClicked(_ sender: NSStatusBarButton) {
         let event = NSApp.currentEvent
         let isRightClick = event?.type == .rightMouseUp || event?.modifierFlags.contains(.control) == true
+        let isOptionClick = event?.modifierFlags.contains(.option) == true
+
+        if isOptionClick && !isRightClick {
+            if popover.isShown {
+                popover.performClose(sender)
+            }
+            AppState.shared.toggleEffectsPausedForCall()
+            updateStatusBar()
+            return
+        }
 
         if isRightClick {
             if popover.isShown {

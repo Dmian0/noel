@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 /// Synthesizes warm, pleasant Christmas music-box melodies and cozy fireplace audio as PCM WAV Data.
 final class AudioSynthesizer {
@@ -7,6 +8,9 @@ final class AudioSynthesizer {
     private let sampleRate: Double = 44100.0
     private var cachedSongs: [Int: Data] = [:]
     private var cachedFireplace: Data?
+    private var cachedSleighBellsLR: Data?
+    private var cachedSleighBellsRL: Data?
+    private var cachedWinterWind: Data?
 
     struct BuiltInSongInfo {
         let index: Int
@@ -56,7 +60,9 @@ final class AudioSynthesizer {
         default:
             data = synthesizeSong(bpm: 120, notes: jingleBellsNotes())
         }
+        cachedSongs.removeAll()
         cachedSongs[index] = data
+        malloc_zone_pressure_relief(nil, 0)
         return data
     }
 
@@ -144,6 +150,245 @@ final class AudioSynthesizer {
 
         let wav = encodeMonoWAV(samples: normalized)
         cachedFireplace = wav
+        malloc_zone_pressure_relief(nil, 0)
+        return wav
+    }
+
+    func generateSleighBellsWAV(leftToRight: Bool) -> Data {
+        if leftToRight, let cached = cachedSleighBellsLR {
+            return cached
+        }
+        if !leftToRight, let cached = cachedSleighBellsRL {
+            return cached
+        }
+
+        let durationSeconds = 5.2
+        let totalSamples = Int(sampleRate * durationSeconds)
+        var monoBuffer = [Float](repeating: 0, count: totalSamples)
+
+        // Metallic partials of sleigh bells
+        let bellFrequencies: [Double] = [2637.0, 3136.0, 3951.0, 5274.0, 6272.0]
+        let bellWeights: [Double] = [0.28, 0.26, 0.22, 0.14, 0.10]
+
+        // Schedule organic shakes (~4 shakes/second)
+        var shakeTimes: [(time: Double, amp: Double, isDouble: Bool)] = []
+        var tShake = 0.22
+        var shakeCount = 0
+        while tShake < 4.95 {
+            let isDouble = (shakeCount % 5 == 2)
+            let jitter = sin(Double(shakeCount) * 2.17) * 0.014
+            let amp = 0.90 + 0.14 * sin(Double(shakeCount) * 1.53)
+            shakeTimes.append((time: tShake + jitter, amp: amp, isDouble: isDouble))
+            tShake += 0.242
+            shakeCount += 1
+        }
+
+        for shake in shakeTimes {
+            let subHits: [(dt: Double, weight: Double)]
+            if shake.isDouble {
+                subHits = [(0.0, 1.0), (0.018, 0.70), (0.076, 0.92), (0.095, 0.62)]
+            } else {
+                subHits = [(0.0, 1.0), (0.016, 0.72), (0.034, 0.45)]
+            }
+
+            for hit in subHits {
+                let hitStart = shake.time + hit.dt
+                let startSample = Int(hitStart * sampleRate)
+                let renderSamples = Int(0.24 * sampleRate)
+                let attackSamples = max(1, Int(0.002 * sampleRate))
+
+                for j in 0..<renderSamples {
+                    let idx = startSample + j
+                    if idx >= totalSamples { break }
+                    let t = Double(j) / sampleRate
+                    let attack = j < attackSamples ? Double(j) / Double(attackSamples) : 1.0
+                    let decay = exp(-t * 22.0)
+                    let env = attack * decay
+
+                    var signal = 0.0
+                    for k in 0..<bellFrequencies.count {
+                        signal += sin(2.0 * .pi * bellFrequencies[k] * t) * bellWeights[k]
+                    }
+
+                    // Subtle metallic shimmer
+                    let shimmer = (sin(2.0 * .pi * 7840.0 * t) * 0.09 + sin(2.0 * .pi * 9320.0 * t) * 0.05) * exp(-t * 36.0)
+                    signal += shimmer
+
+                    monoBuffer[idx] += Float(signal * env * shake.amp * hit.weight * 0.42)
+                }
+            }
+        }
+
+        // Magical high bell chime at the center of the flight
+        let magicChimeTimes: [Double] = [2.38, 2.64]
+        for chimeTime in magicChimeTimes {
+            let startSample = Int(chimeTime * sampleRate)
+            let chimeSamples = Int(1.3 * sampleRate)
+            let attackSamples = max(1, Int(0.004 * sampleRate))
+
+            for j in 0..<chimeSamples {
+                let idx = startSample + j
+                if idx >= totalSamples { break }
+                let t = Double(j) / sampleRate
+                let attack = j < attackSamples ? Double(j) / Double(attackSamples) : 1.0
+                let env = attack * exp(-t * 4.8)
+
+                let chimeSignal = (
+                    sin(2.0 * .pi * 3520.0 * t) * 0.35 +
+                    sin(2.0 * .pi * 4186.0 * t) * 0.30 +
+                    sin(2.0 * .pi * 5274.0 * t) * 0.22 +
+                    sin(2.0 * .pi * 7040.0 * t) * 0.13
+                ) * env * 0.35
+
+                monoBuffer[idx] += Float(chimeSignal)
+            }
+        }
+
+        // Apply distance envelope and continuous stereo panning
+        var leftBuffer = [Float](repeating: 0, count: totalSamples)
+        var rightBuffer = [Float](repeating: 0, count: totalSamples)
+
+        for i in 0..<totalSamples {
+            let progress = Double(i) / Double(totalSamples)
+            let distEnv = Float(sin(Double.pi * progress))
+
+            let pan = leftToRight ? (-0.82 + 1.64 * progress) : (0.82 - 1.64 * progress)
+            let angle = Float((pan + 1.0) * 0.25 * Double.pi)
+            let leftGain = cosf(angle) * distEnv
+            let rightGain = sinf(angle) * distEnv
+
+            let s = monoBuffer[i]
+            leftBuffer[i] = s * leftGain
+            rightBuffer[i] = s * rightGain
+        }
+
+        // Gentle normalization with tanhf for warm, pleasant volume
+        var peak: Float = 0.001
+        for i in 0..<totalSamples {
+            let maxChannel = max(abs(leftBuffer[i]), abs(rightBuffer[i]))
+            if maxChannel > peak {
+                peak = maxChannel
+            }
+        }
+
+        let targetGain = 0.88 / peak
+        for i in 0..<totalSamples {
+            leftBuffer[i] = tanhf(leftBuffer[i] * targetGain) * 0.82
+            rightBuffer[i] = tanhf(rightBuffer[i] * targetGain) * 0.82
+        }
+
+        let wavData = encodeStereoWAV(left: leftBuffer, right: rightBuffer)
+        if leftToRight {
+            cachedSleighBellsLR = wavData
+        } else {
+            cachedSleighBellsRL = wavData
+        }
+        malloc_zone_pressure_relief(nil, 0)
+        return wavData
+    }
+
+    func generateWinterWindWAV() -> Data {
+        if let cached = cachedWinterWind {
+            return cached
+        }
+
+        let durationSeconds = 14.0
+        let totalSamples = Int(sampleRate * durationSeconds)
+        var leftBuffer = [Float](repeating: 0, count: totalSamples)
+        var rightBuffer = [Float](repeating: 0, count: totalSamples)
+
+        var rngState: UInt64 = 0x51E1_7777_8888_9999
+        func nextUniform() -> Float {
+            rngState = rngState &* 6364136223846793005 &+ 1442695040888963407
+            let shifted = UInt32((rngState >> 32) & 0xFFFF_FFFF)
+            return (Float(shifted) / Float(UInt32.max)) * 2.0 - 1.0
+        }
+
+        var lpL1: Float = 0.0, lpL2: Float = 0.0, lpL3: Float = 0.0
+        var lpR1: Float = 0.0, lpR2: Float = 0.0, lpR3: Float = 0.0
+        var whistlePhaseL: Float = 0.0
+        var whistlePhaseR: Float = 0.0
+
+        for i in 0..<totalSamples {
+            let t = Float(i) / Float(sampleRate)
+
+            // LFOs out of phase between left and right channels
+            let lfoL = 0.50
+                + 0.28 * sinf(2.0 * .pi * 0.14 * t)
+                + 0.14 * sinf(2.0 * .pi * 0.31 * t + 0.8)
+                + 0.08 * sinf(2.0 * .pi * 0.07 * t + 2.1)
+
+            let lfoR = 0.50
+                + 0.28 * sinf(2.0 * .pi * 0.14 * t + 1.35)
+                + 0.14 * sinf(2.0 * .pi * 0.31 * t + 2.4)
+                + 0.08 * sinf(2.0 * .pi * 0.07 * t + 0.6)
+
+            let alphaL = max(0.008, min(0.065, 0.012 + 0.038 * lfoL))
+            let alphaR = max(0.008, min(0.065, 0.012 + 0.038 * lfoR))
+
+            let whiteL = nextUniform()
+            let whiteR = nextUniform()
+
+            lpL1 += alphaL * (whiteL - lpL1)
+            lpL2 += alphaL * (lpL1 - lpL2)
+            lpL3 += alphaL * (lpL2 - lpL3)
+
+            lpR1 += alphaR * (whiteR - lpR1)
+            lpR2 += alphaR * (lpR1 - lpR2)
+            lpR3 += alphaR * (lpR2 - lpR3)
+
+            // Soft resonant whistling around 380-620 Hz modulated by gusts
+            let whistleFreqL = 480.0 + 110.0 * sinf(2.0 * .pi * 0.14 * t + 0.5) + 30.0 * sinf(2.0 * .pi * 0.31 * t)
+            let whistleFreqR = 490.0 + 110.0 * sinf(2.0 * .pi * 0.14 * t + 1.85) + 30.0 * sinf(2.0 * .pi * 0.31 * t + 1.2)
+
+            whistlePhaseL += 2.0 * .pi * whistleFreqL / Float(sampleRate)
+            whistlePhaseR += 2.0 * .pi * whistleFreqR / Float(sampleRate)
+
+            let gustL = max(0.0, lfoL - 0.25)
+            let gustR = max(0.0, lfoR - 0.25)
+
+            let whistleL = sinf(whistlePhaseL) * 0.08 * gustL
+            let whistleR = sinf(whistlePhaseR) * 0.08 * gustR
+
+            leftBuffer[i] = (lpL3 * 3.6 + whistleL) * (0.65 + 0.45 * lfoL)
+            rightBuffer[i] = (lpR3 * 3.6 + whistleR) * (0.65 + 0.45 * lfoR)
+        }
+
+        // Equal-power crossfade of 0.6s at loop boundary
+        let fadeSamples = Int(sampleRate * 0.6)
+        for i in 0..<fadeSamples {
+            let ratio = Float(i) / Float(fadeSamples)
+            let tailIndex = totalSamples - fadeSamples + i
+            let fadeIn = sinf(ratio * .pi * 0.5)
+            let fadeOut = cosf(ratio * .pi * 0.5)
+            leftBuffer[i] = leftBuffer[i] * fadeIn + leftBuffer[tailIndex] * fadeOut
+            rightBuffer[i] = rightBuffer[i] * fadeIn + rightBuffer[tailIndex] * fadeOut
+        }
+
+        let loopedCount = totalSamples - fadeSamples
+        let finalLeft = Array(leftBuffer.prefix(loopedCount))
+        let finalRight = Array(rightBuffer.prefix(loopedCount))
+
+        // Gentle normalization with tanhf
+        var peak: Float = 0.001
+        for i in 0..<loopedCount {
+            let chMax = max(abs(finalLeft[i]), abs(finalRight[i]))
+            if chMax > peak {
+                peak = chMax
+            }
+        }
+
+        let targetGain = 0.70 / peak
+        var normLeft = [Float](repeating: 0, count: loopedCount)
+        var normRight = [Float](repeating: 0, count: loopedCount)
+        for i in 0..<loopedCount {
+            normLeft[i] = tanhf(finalLeft[i] * targetGain) * 0.72
+            normRight[i] = tanhf(finalRight[i] * targetGain) * 0.72
+        }
+
+        let wav = encodeStereoWAV(left: normLeft, right: normRight)
+        cachedWinterWind = wav
+        malloc_zone_pressure_relief(nil, 0)
         return wav
     }
 
@@ -245,13 +490,49 @@ final class AudioSynthesizer {
         data.append(contentsOf: "data".utf8)
         appendUInt32(&data, dataSize)
 
-        for sample in samples {
-            let clamped = max(-1.0, min(1.0, sample))
-            var intSample = Int16(clamped * 32767.0).littleEndian
-            withUnsafeBytes(of: &intSample) { bytes in
-                data.append(contentsOf: bytes)
-            }
+        var pcm = [Int16](repeating: 0, count: samples.count)
+        for i in 0..<samples.count {
+            let clamped = max(-1.0, min(1.0, samples[i]))
+            pcm[i] = Int16(clamped * 32767.0).littleEndian
         }
+        pcm.withUnsafeBufferPointer { data.append($0) }
+        return data
+    }
+
+    private func encodeStereoWAV(left: [Float], right: [Float]) -> Data {
+        let count = min(left.count, right.count)
+        let numChannels: UInt16 = 2
+        let bitsPerSample: UInt16 = 16
+        let sampleRateInt = UInt32(sampleRate)
+        let byteRate = sampleRateInt * UInt32(numChannels) * UInt32(bitsPerSample / 8)
+        let blockAlign = numChannels * (bitsPerSample / 8)
+        let dataSize = UInt32(count * Int(numChannels) * 2)
+        let chunkSize = 36 + dataSize
+
+        var data = Data(capacity: Int(44 + dataSize))
+        data.append(contentsOf: "RIFF".utf8)
+        appendUInt32(&data, chunkSize)
+        data.append(contentsOf: "WAVE".utf8)
+        data.append(contentsOf: "fmt ".utf8)
+        appendUInt32(&data, 16)
+        appendUInt16(&data, 1)
+        appendUInt16(&data, numChannels)
+        appendUInt32(&data, sampleRateInt)
+        appendUInt32(&data, byteRate)
+        appendUInt16(&data, blockAlign)
+        appendUInt16(&data, bitsPerSample)
+        data.append(contentsOf: "data".utf8)
+        appendUInt32(&data, dataSize)
+
+        var pcm = [Int16](repeating: 0, count: count * 2)
+        for i in 0..<count {
+            let clampedL = max(-1.0, min(1.0, left[i]))
+            pcm[i * 2] = Int16(clampedL * 32767.0).littleEndian
+
+            let clampedR = max(-1.0, min(1.0, right[i]))
+            pcm[i * 2 + 1] = Int16(clampedR * 32767.0).littleEndian
+        }
+        pcm.withUnsafeBufferPointer { data.append($0) }
         return data
     }
 

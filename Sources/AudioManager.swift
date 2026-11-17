@@ -92,6 +92,7 @@ final class AudioManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
         static let isShuffle = "navidadbar.isShuffle"
         static let sourceFilter = "navidadbar.sourceFilter"
         static let musicProvider = "noel.musicProvider"
+        static let windVolume = "noel.windVolume"
     }
 
     @Published var musicProvider: MusicPlayerProvider {
@@ -156,11 +157,22 @@ final class AudioManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
         }
     }
 
+    @Published var isWindPlaying: Bool = false
+    @Published var windVolume: Float {
+        didSet {
+            UserDefaults.standard.set(windVolume, forKey: Keys.windVolume)
+            windPlayer?.volume = windVolume
+        }
+    }
+
     @Published private(set) var customTrackCount: Int = 0
     @Published private(set) var builtInTrackCount: Int = 0
 
     private var musicPlayer: AVAudioPlayer?
     private var fireplacePlayer: AVAudioPlayer?
+    private var sleighPlayer: AVAudioPlayer?
+    private var windPlayer: AVAudioPlayer?
+    private var wasBlizzardActive: Bool = false
     private let supportedExtensions: Set<String> = ["mp3", "m4a", "wav", "aac", "aiff", "flac"]
 
     private var isUpdatingFromExternal = false
@@ -171,6 +183,7 @@ final class AudioManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
         let defaults = UserDefaults.standard
         self.musicVolume = defaults.object(forKey: Keys.musicVolume) as? Float ?? 0.72
         self.fireplaceVolume = defaults.object(forKey: Keys.fireplaceVolume) as? Float ?? 0.45
+        self.windVolume = defaults.object(forKey: Keys.windVolume) as? Float ?? 0.38
         self.isShuffle = defaults.object(forKey: Keys.isShuffle) as? Bool ?? false
 
         if let rawFilter = defaults.string(forKey: Keys.sourceFilter),
@@ -637,6 +650,7 @@ final class AudioManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
 
             player.delegate = self
             player.volume = musicVolume
+            player.isMeteringEnabled = true
             player.prepareToPlay()
             if player.play() {
                 self.musicPlayer = player
@@ -755,6 +769,97 @@ final class AudioManager: NSObject, ObservableObject, AVAudioPlayerDelegate {
             NSLog("Noël fireplace error: \(error.localizedDescription)")
             isFireplacePlaying = false
         }
+    }
+
+    // MARK: - Santa Sleigh Audio
+
+    func playSleighBells(leftToRight: Bool) {
+        guard AppState.shared.santaSoundEnabled else { return }
+
+        do {
+            let wavData = AudioSynthesizer.shared.generateSleighBellsWAV(leftToRight: leftToRight)
+            let player = try AVAudioPlayer(data: wavData, fileTypeHint: AVFileType.wav.rawValue)
+            player.volume = min(0.45, max(0.18, musicVolume * 0.42))
+            player.prepareToPlay()
+            player.play()
+            self.sleighPlayer = player
+        } catch {
+            NSLog("Noël sleigh audio error: \(error.localizedDescription)")
+        }
+    }
+
+    // MARK: - Winter Wind Ambient Audio
+
+    func toggleWind() {
+        setWindPlaying(!isWindPlaying)
+    }
+
+    func setWindPlaying(_ enabled: Bool) {
+        if !enabled {
+            windPlayer?.stop()
+            isWindPlaying = false
+            return
+        }
+
+        if let existing = windPlayer {
+            existing.volume = windVolume
+            existing.numberOfLoops = -1
+            if existing.play() {
+                isWindPlaying = true
+                return
+            }
+        }
+
+        do {
+            let wavData = AudioSynthesizer.shared.generateWinterWindWAV()
+            let player = try AVAudioPlayer(data: wavData, fileTypeHint: AVFileType.wav.rawValue)
+            player.numberOfLoops = -1
+            player.volume = windVolume
+            player.prepareToPlay()
+            if player.play() {
+                windPlayer = player
+                isWindPlaying = true
+            }
+        } catch {
+            NSLog("Noël wind audio error: \(error.localizedDescription)")
+            isWindPlaying = false
+        }
+    }
+
+    func syncWinterWindWithSnow(isSnowing: Bool, intensity: Double) {
+        let isBlizzardNow = isSnowing && intensity >= 0.85
+        if isBlizzardNow && !wasBlizzardActive && !isWindPlaying {
+            setWindPlaying(true)
+        } else if !isSnowing && isWindPlaying {
+            setWindPlaying(false)
+        }
+        wasBlizzardActive = isBlizzardNow
+    }
+
+    // MARK: - Audio Levels Analysis
+
+    func currentAudioLevels(at time: Double) -> (bass: Double, treble: Double, isActive: Bool) {
+        if musicProvider == .noel, isPlaying, let player = musicPlayer, player.isPlaying {
+            player.updateMeters()
+            let avgDB = Double(player.averagePower(forChannel: 0))
+            let peakDB = Double(player.peakPower(forChannel: 0))
+            let avgNorm = max(0.0, min(1.0, (avgDB + 42.0) / 42.0))
+            let peakNorm = max(0.0, min(1.0, (peakDB + 35.0) / 35.0))
+            let bass = max(0.16, min(1.0, pow(avgNorm, 0.85) * (0.80 + 0.20 * sin(time * 6.2))))
+            let treble = max(0.16, min(1.0, pow(peakNorm, 0.75) * (0.78 + 0.22 * abs(cos(time * 11.5)))))
+            return (bass, treble, true)
+        }
+
+        if musicProvider != .noel && isPlaying {
+            let beatPhase = time * (124.0 / 60.0) * 2.0 * .pi
+            let bassPulse = pow(0.5 + 0.5 * sin(beatPhase), 2.2)
+            let treblePulse = pow(0.5 + 0.5 * cos(beatPhase * 2.0 + 0.8), 1.8)
+            let bass = 0.22 + 0.68 * bassPulse
+            let treble = 0.20 + 0.70 * treblePulse
+            return (bass, treble, true)
+        }
+
+        return (0.24 + 0.08 * sin(time * 1.5), 0.24 + 0.08 * cos(time * 1.9), false)
     }
 
     // MARK: - AVAudioPlayerDelegate

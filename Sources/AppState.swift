@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import ServiceManagement
 
 enum AppLanguage: String, CaseIterable, Identifiable {
     case es = "es"
@@ -120,6 +121,7 @@ enum LightsPattern: String, CaseIterable, Identifiable {
     case twinkle = "twinkle"
     case wave = "wave"
     case warmSteady = "warmSteady"
+    case rhythm = "rhythm"
 
     var id: String { rawValue }
 
@@ -127,7 +129,42 @@ enum LightsPattern: String, CaseIterable, Identifiable {
         switch self {
         case .twinkle: return lang == .en ? "Twinkle" : "Parpadeo"
         case .wave: return lang == .en ? "Wave" : "Ola"
-        case .warmSteady: return lang == .en ? "Warm glow" : "Cálida"
+        case .warmSteady: return lang == .en ? "Steady" : "Fija"
+        case .rhythm: return lang == .en ? "Rhythm" : "Ritmo"
+        }
+    }
+
+    var displayName: String {
+        displayName(in: AppState.shared.language)
+    }
+}
+
+enum LightsPalette: String, CaseIterable, Identifiable {
+    case classic = "classic"
+    case warm = "warm"
+    case candyCane = "candyCane"
+    case nordicIce = "nordicIce"
+    case pineGold = "pineGold"
+
+    var id: String { rawValue }
+
+    func displayName(in lang: AppLanguage) -> String {
+        switch self {
+        case .classic: return lang == .en ? "Classic" : "Clásica"
+        case .warm: return lang == .en ? "Warm White" : "Blanco Cálido"
+        case .candyCane: return lang == .en ? "Candy Cane" : "Caramelo"
+        case .nordicIce: return lang == .en ? "Nordic Ice" : "Hielo Nórdico"
+        case .pineGold: return lang == .en ? "Pine & Gold" : "Pino y Oro"
+        }
+    }
+
+    func shortName(in lang: AppLanguage) -> String {
+        switch self {
+        case .classic: return "Multi"
+        case .warm: return lang == .en ? "Warm" : "Cálida"
+        case .candyCane: return lang == .en ? "Candy" : "Caram."
+        case .nordicIce: return lang == .en ? "Nordic" : "Nórd."
+        case .pineGold: return lang == .en ? "Pine" : "Pino"
         }
     }
 
@@ -174,6 +211,52 @@ enum ScreenTargetMode: String, CaseIterable, Identifiable {
     }
 }
 
+enum SantaFrequency: String, CaseIterable, Identifiable {
+    case off = "off"
+    case occasional = "occasional"
+    case frequent = "frequent"
+
+    var id: String { rawValue }
+
+    var intervalSeconds: TimeInterval? {
+        switch self {
+        case .off: return nil
+        case .occasional: return 180.0
+        case .frequent: return 45.0
+        }
+    }
+
+    func displayName(in lang: AppLanguage) -> String {
+        switch self {
+        case .off: return lang == .en ? "Off" : "No"
+        case .occasional: return lang == .en ? "Occasional" : "Ocasional"
+        case .frequent: return lang == .en ? "Frequent" : "Frecuente"
+        }
+    }
+
+    var displayName: String {
+        displayName(in: AppState.shared.language)
+    }
+}
+
+enum SnowLayerMode: String, CaseIterable, Identifiable {
+    case aboveAll = "aboveAll"
+    case desktopOnly = "desktopOnly"
+
+    var id: String { rawValue }
+
+    func displayName(in lang: AppLanguage) -> String {
+        switch self {
+        case .aboveAll: return lang == .en ? "Above all" : "Sobre todo"
+        case .desktopOnly: return lang == .en ? "Desktop" : "Escritorio"
+        }
+    }
+
+    var displayName: String {
+        displayName(in: AppState.shared.language)
+    }
+}
+
 final class AppState: ObservableObject {
     static let shared = AppState()
 
@@ -191,6 +274,14 @@ final class AppState: ObservableObject {
         static let fontStyle = "noel.fontStyle"
         static let language = "noel.language"
         static let screenTargetMode = "noel.screenTargetMode"
+        static let santaFrequency = "noel.santaFrequency"
+        static let santaSoundEnabled = "noel.santaSoundEnabled"
+        static let snowLayerMode = "noel.snowLayerMode"
+        static let lightsPalette = "noel.lightsPalette"
+        static let snowflakesStyle = "noel.snowflakesStyle"
+        static let snowbankStyle = "noel.snowbankStyle"
+        static let lightsStyle = "noel.lightsStyle"
+        static let launchAtLogin = "noel.launchAtLogin"
     }
 
     static var languageStorageKey: String {
@@ -234,6 +325,7 @@ final class AppState: ObservableObject {
         didSet {
             UserDefaults.standard.set(isSnowing, forKey: Keys.isSnowing)
             DispatchQueue.main.async { ScreenEffectsManager.shared.syncWithState() }
+            DispatchQueue.main.async { AudioManager.shared.syncWinterWindWithSnow(isSnowing: self.isSnowing, intensity: self.snowIntensity) }
         }
     }
 
@@ -241,6 +333,7 @@ final class AppState: ObservableObject {
         didSet {
             UserDefaults.standard.set(snowIntensity, forKey: Keys.snowIntensity)
             DispatchQueue.main.async { ScreenEffectsManager.shared.syncWithState() }
+            DispatchQueue.main.async { AudioManager.shared.syncWinterWindWithSnow(isSnowing: self.isSnowing, intensity: self.snowIntensity) }
         }
     }
 
@@ -258,6 +351,13 @@ final class AppState: ObservableObject {
         }
     }
 
+    @Published var lightsPalette: LightsPalette {
+        didSet {
+            UserDefaults.standard.set(lightsPalette.rawValue, forKey: Keys.lightsPalette)
+            DispatchQueue.main.async { ScreenEffectsManager.shared.syncWithState() }
+        }
+    }
+
     @Published var customMusicFolderPath: String? {
         didSet { UserDefaults.standard.set(customMusicFolderPath, forKey: Keys.customMusicFolderPath) }
     }
@@ -266,6 +366,76 @@ final class AppState: ObservableObject {
         didSet {
             UserDefaults.standard.set(screenTargetMode.rawValue, forKey: Keys.screenTargetMode)
             DispatchQueue.main.async { ScreenEffectsManager.shared.syncWithState() }
+        }
+    }
+
+    @Published var santaFrequency: SantaFrequency {
+        didSet {
+            UserDefaults.standard.set(santaFrequency.rawValue, forKey: Keys.santaFrequency)
+            DispatchQueue.main.async { ScreenEffectsManager.shared.syncWithState() }
+        }
+    }
+
+    @Published var santaSoundEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(santaSoundEnabled, forKey: Keys.santaSoundEnabled)
+        }
+    }
+
+    @Published var snowLayerMode: SnowLayerMode {
+        didSet {
+            UserDefaults.standard.set(snowLayerMode.rawValue, forKey: Keys.snowLayerMode)
+            DispatchQueue.main.async { ScreenEffectsManager.shared.syncWithState() }
+        }
+    }
+
+    @Published var snowflakesStyle: IconStyle {
+        didSet {
+            UserDefaults.standard.set(snowflakesStyle.rawValue, forKey: Keys.snowflakesStyle)
+            DispatchQueue.main.async { ScreenEffectsManager.shared.syncWithState() }
+        }
+    }
+
+    @Published var snowbankStyle: IconStyle {
+        didSet {
+            UserDefaults.standard.set(snowbankStyle.rawValue, forKey: Keys.snowbankStyle)
+            DispatchQueue.main.async { ScreenEffectsManager.shared.syncWithState() }
+        }
+    }
+
+    @Published var lightsStyle: IconStyle {
+        didSet {
+            UserDefaults.standard.set(lightsStyle.rawValue, forKey: Keys.lightsStyle)
+            DispatchQueue.main.async { ScreenEffectsManager.shared.syncWithState() }
+        }
+    }
+
+    @Published var isEffectsPausedForCall: Bool = false {
+        didSet {
+            DispatchQueue.main.async { ScreenEffectsManager.shared.syncWithState() }
+        }
+    }
+
+    func toggleEffectsPausedForCall() {
+        isEffectsPausedForCall.toggle()
+    }
+
+    @Published var launchAtLogin: Bool {
+        didSet {
+            UserDefaults.standard.set(launchAtLogin, forKey: Keys.launchAtLogin)
+            do {
+                if launchAtLogin {
+                    if SMAppService.mainApp.status != .enabled {
+                        try SMAppService.mainApp.register()
+                    }
+                } else {
+                    if SMAppService.mainApp.status == .enabled {
+                        try SMAppService.mainApp.unregister()
+                    }
+                }
+            } catch {
+                NSLog("Noël launchAtLogin error: \(error.localizedDescription)")
+            }
         }
     }
 
@@ -330,6 +500,13 @@ final class AppState: ObservableObject {
             self.lightsPattern = .twinkle
         }
 
+        if let rawPalette = defaults.string(forKey: Keys.lightsPalette),
+           let pal = LightsPalette(rawValue: rawPalette) {
+            self.lightsPalette = pal
+        } else {
+            self.lightsPalette = .classic
+        }
+
         self.customMusicFolderPath = defaults.string(forKey: Keys.customMusicFolderPath)
 
         if let rawScreenMode = defaults.string(forKey: Keys.screenTargetMode),
@@ -338,6 +515,45 @@ final class AppState: ObservableObject {
         } else {
             self.screenTargetMode = .allScreens
         }
+
+        if let rawSantaFreq = defaults.string(forKey: Keys.santaFrequency),
+           let freq = SantaFrequency(rawValue: rawSantaFreq) {
+            self.santaFrequency = freq
+        } else {
+            self.santaFrequency = .occasional
+        }
+
+        self.santaSoundEnabled = defaults.object(forKey: Keys.santaSoundEnabled) as? Bool ?? true
+
+        if let rawSnowLayer = defaults.string(forKey: Keys.snowLayerMode),
+           let mode = SnowLayerMode(rawValue: rawSnowLayer) {
+            self.snowLayerMode = mode
+        } else {
+            self.snowLayerMode = .aboveAll
+        }
+
+        if let rawSnowflakesStyle = defaults.string(forKey: Keys.snowflakesStyle),
+           let style = IconStyle(rawValue: rawSnowflakesStyle) {
+            self.snowflakesStyle = style
+        } else {
+            self.snowflakesStyle = .colorful
+        }
+
+        if let rawSnowbankStyle = defaults.string(forKey: Keys.snowbankStyle),
+           let style = IconStyle(rawValue: rawSnowbankStyle) {
+            self.snowbankStyle = style
+        } else {
+            self.snowbankStyle = .colorful
+        }
+
+        if let rawLightsStyle = defaults.string(forKey: Keys.lightsStyle),
+           let style = IconStyle(rawValue: rawLightsStyle) {
+            self.lightsStyle = style
+        } else {
+            self.lightsStyle = .colorful
+        }
+
+        self.launchAtLogin = (SMAppService.mainApp.status == .enabled) || (defaults.object(forKey: Keys.launchAtLogin) as? Bool ?? false)
     }
 
     func countdownToChristmas(from now: Date = Date()) -> (days: Int, hours: Int, isChristmasToday: Bool) {

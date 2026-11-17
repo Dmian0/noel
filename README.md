@@ -5,7 +5,7 @@
 **Reproductor navideño artesanal para la barra de menú de macOS · An artisanal holiday companion for the macOS menu bar.**
 
 <p>
-  <a href="https://github.com/Dmian0/noel/releases/tag/v1.0.1"><img src="https://img.shields.io/badge/release-v1.0.1-B84237.svg?style=flat-square" alt="Release v1.0.1" /></a>
+  <a href="https://github.com/Dmian0/noel/releases/tag/v1.1.0"><img src="https://img.shields.io/badge/release-v1.1.0-B84237.svg?style=flat-square" alt="Release v1.1.0" /></a>
   <img src="https://img.shields.io/badge/macOS-13%2B%20Ventura-1B3022.svg?style=flat-square" alt="macOS 13+ Ventura" />
   <img src="https://img.shields.io/badge/Swift-5.9%20%7C%20SwiftUI-D4AF37.svg?style=flat-square" alt="Swift 5.9 | SwiftUI" />
   <a href="https://github.com/Dmian0/homebrew-noel"><img src="https://img.shields.io/badge/homebrew-Dmian0%2Fnoel-1B3022.svg?style=flat-square" alt="Homebrew Cask" /></a>
@@ -87,7 +87,7 @@ Descarga [Noel.zip](https://github.com/Dmian0/noel/releases/latest/download/Noel
 <a id="espanol"></a>
 ## Español
 
-**Noël** es una utilidad artesanal para la barra de menú de macOS diseñada para transformar tu espacio de trabajo durante la temporada festiva. Desarrollada de forma nativa en Swift y SwiftUI con AppKit, combina música navideña procedural estilo caja de música, sonido de leña crepitante generado por síntesis de audio en tiempo real, iconos animados vectoriales en 3D y Pixel Art, nevada interactiva sobre la pantalla y guirnaldas de luces superiores.
+**Noël** es una utilidad artesanal para la barra de menú de macOS diseñada para transformar tu espacio de trabajo durante la temporada festiva. Desarrollada de forma nativa en Swift y SwiftUI con AppKit, combina música navideña procedural estilo caja de música, sonido de leña crepitante generado por síntesis de audio en tiempo real, viento invernal en estéreo, iconos animados vectoriales en 3D y Pixel Art, nevada interactiva sobre la pantalla, guirnaldas de luces superiores y el trineo de Santa Claus cruzando tus monitores.
 
 <a id="controles-rapidos"></a>
 ### Controles Rápidos
@@ -96,32 +96,47 @@ Descarga [Noel.zip](https://github.com/Dmian0/noel/releases/latest/download/Noel
 | :--- | :--- |
 | **Clic izquierdo en el icono** | Abre o cierra el panel compacto con la cuenta regresiva navideña y el reproductor de audio. |
 | **Clic derecho en el icono** | Alterna Reproducir / Pausar al instante sin desplegar el panel. |
-| **Pastillas de ambiente (Nieve, Luces, Fuego)** | Activa o desactiva las capas transparentes de efectos visuales y el crepitar de chimenea; revela controles contextuales de intensidad de nevada (Suave, Media, Nevada Blizzard) y patrones luminosos (Parpadeo, Ola, Cálida). |
+| **Option (⌥) + Clic en el icono** | Alterna el Modo Reunión / Llamada (también accesible desde el botón de ojo en el panel): oculta o reanuda de inmediato todos los efectos visuales de pantalla (nieve, luces y trineo) conservando intacta tu configuración. |
+| **Pastillas de ambiente (Nieve, Luces, Fuego)** | Activa o desactiva las capas transparentes de efectos visuales y el crepitar de chimenea; revela controles contextuales de intensidad de nevada (`Suave`, `Media`, `Nevada / Blizzard`), capa de visualización (`Sobre todo` / `Solo escritorio`), viento invernal procedural con volumen independiente, patrones luminosos (`Parpadeo`, `Ola`, `Fija`, `Ritmo`), 5 paletas de color para luces y selectores independientes de estilo `3D` vs `Pixel Art`. |
+| **Nieve e interacción en pantalla** | Pasa el cursor por el manto inferior para apartar la nieve (quitanieves reactivo) o mantén presionado y arrastra hacia arriba para formar y disparar bolas de nieve con física gravitatoria contra la guirnalda de luces (haciendo oscilar bombillas y quebrando carámbanos) o contra el trineo de Santa en vuelo. |
+| **El Trineo de Santa** | Configura la frecuencia de aparición periódica (`No`, `Ocasional`, `Frecuente`), activa o desactiva cascabeles procedurales o pulsa **Volar** para invocar a Santa y sus renos de inmediato a través de la pantalla. |
 | **Selector de carpeta de música** | Vincula cualquier carpeta local con archivos MP3, M4A, WAV o FLAC junto a las cinco melodías de caja de música integradas. |
 
 ### Características Principales
 
-- **Integración con Spotify y Apple Music:**  
-  Selector `NOËL | SPOTIFY | APPLE MUSIC` para sincronizar en tiempo real la canción y el artista activos y controlar reproducción, pista siguiente/anterior, modo aleatorio y volumen, manteniendo independiente el sonido de chimenea.
+- **El Trineo de Santa Claus:**  
+  Apariciones periódicas configurables (`No`, `Ocasional`, `Frecuente`) o invocación manual inmediata con el botón **Volar** en el panel. Santa, Rudolph con nariz roja brillante y sus renos cruzan toda la pantalla a través de 4 trayectorias orgánicas (`diagonalClimb`, `panoramicWave`, `centerDive`, `sweepingArc`), dejando una estela dorada de partículas resplandecientes, soltando regalos con paracaídas flotante y acompañados de un tintineo procedural de cascabeles con paneo estéreo binaural. Si alcanzas el trineo con una bola de nieve, soltará un regalo adicional con una ráfaga de destellos.
 
-- **Soporte Multipantalla:**  
-  Selector de pantallas (`Todas` / `Principal`) que extiende la nevada y las guirnaldas de luces a todos los monitores conectados, escalando dinámicamente la cantidad de copos y bombillas según el ancho de cada pantalla.
+- **Nevada Interactiva, Física y Manto «Camaleón»:**  
+  Tres planos de profundidad con hasta 300 copos simultáneos en modo `Nevada (Blizzard)`, ráfagas diagonales reactivas al cursor y acumulación progresiva sobre el borde inferior de la pantalla. Manto continuo suave de 44 pt sin costuras verticales ni cortes artificiales, con física de quitanieves gaussiano al pasar el mouse. Selector de capa (`Sobre todo` / `Solo escritorio`) para enviar la nieve detrás de tus ventanas abiertas. Arquitectura ultra-eficiente basada en franja bitmap con *dirty rendering* que mantiene el consumo en apenas ~40 MB de RAM.
+
+- **Guirnalda con 5 Paletas, Carámbanos y Modo `Ritmo` (`Audio-Reactivo`):**  
+  Guirnalda festoneada superior con 5 paletas de color artesanales (*Clásica Multicolor*, *Blanco Cálido*, *Bastón de Caramelo*, *Hielo Nórdico* y *Pino y Oro*) con previsualización de puntos de color. Carámbanos de hielo translúcidos que crecen orgánicamente sobre el cable y se rompen en esquirlas al golpearlos. Cuarto patrón de iluminación **`Ritmo`** que hace latir las bombillas con reactividad de doble banda: espectro sonoro en tiempo real para música integrada en `AVAudioPlayer` y pulso sincronizado con la reproducción activa en Spotify o Apple Music.
+
+- **Estilos `Color 3D` y `Pixel Art` Independientes:**  
+  Libertad total para mezclar estéticas visuales: elige por separado `3D` o `Pixel Art` de 8 bits en los copos de nieve, el manto inferior acumulado, la guirnalda de luces superior y el personaje de la barra de estado.
+
+- **Viento Invernal en Estéreo y Comodidad en el Día a Día:**  
+  Síntesis procedural en tiempo real de viento invernal con ruido rosa filtrado, fluctuación estocástica de ráfagas y paneo estéreo, con control de volumen independiente y auto-activación al activar la intensidad Blizzard. Atajo rápido `Option + Clic` (o botón de ojo en el panel) para llamadas y pantalla compartida, e interruptor nativo para iniciar automáticamente al encender la Mac (`Launch at Login` mediante `SMAppService` en macOS 13+).
+
+- **Integración Nativa con Spotify y Apple Music:**  
+  Selector `NOËL | SPOTIFY | APPLE MUSIC` para sincronizar en tiempo real el título de pista, subtítulo y estado de reproducción, permitiendo controlar avance, retroceso, pausa y volumen sin interrumpir los ambientes sonoros de chimenea y viento invernal.
 
 - **Audio Procedural en Tiempo Real:**  
   Cinco villancicos clásicos sintetizados nota a nota mediante síntesis de ondas (*Jingle Bells*, *We Wish You a Merry Christmas*, *Noche de Paz / Silent Night*, *Deck the Halls*, *Carol of the Bells*). Generador continuo de chimenea con 12 segundos de audio procedimental con algoritmos estocásticos para emular el crujido y las chispas de la madera, sin muestras pregrabadas ni consumo de red. Compatibilidad total con bibliotecas locales de audio en formatos MP3, M4A, WAV y FLAC.
 
-- **Efectos de Pantalla Transparentes:**  
-  Capa flotante no interactiva (*click-through*) que despliega una nevada suave o tormenta sobre todo el escritorio (hasta 260 copos con balanceo de viento calculado dinámicamente según intensidad: Suave, Media, Nevada). Guirnalda festoneada de bombillas festivas sobre el borde superior de la pantalla con modos de iluminación Parpadeo, Ola rítmica y Brillo cálido constante.
+- **Soporte Multipantalla:**  
+  Selector de pantallas (`Todas` / `Principal`) que extiende la nevada, las guirnaldas de luces y el vuelo de Santa a todos los monitores conectados, escalando dinámicamente la cantidad de copos, bombillas y dimensiones a cada resolución.
 
 - **Diseño Artesanal y Personalización:**  
-  Estética cuidada sin emojis en los textos de interfaz. Modos de apariencia Pino Nocturno (Dark), Papel Crema (Light) y Automático (según el sistema), sincronizando el tinte del contenedor popover y su flecha de anclaje. Tipografía seleccionable entre American Typewriter y Optima. Cinco figuras para la barra de estado (*Pino*, *Muñeco de nieve*, *Reno Rudolph*, *Gorro de Santa*, *Taza de Chocolate*) con rotación en 3D vectorial o Pixel Art de 8 bits. Contador opcional de días restantes visible directamente en la barra de menú.
+  Estética cuidada sin emojis en los textos de interfaz. Modos de apariencia Pino Nocturno (Dark), Papel Crema (Light) y Automático (según el sistema), sincronizando el contenedor popover y su flecha de anclaje. Tipografía seleccionable entre American Typewriter y Optima. Cinco figuras para la barra de estado (*Pino*, *Muñeco de nieve*, *Reno Rudolph*, *Gorro de Santa*, *Taza de Chocolate*) con rotación en 3D vectorial o Pixel Art de 8 bits. Contador opcional de días restantes visible directamente en la barra de menú.
 
 ---
 
 <a id="english"></a>
 ## English
 
-**Noël** is an artisanal macOS menu bar companion designed to bring warm, festive cheer to your workspace during the holiday season. Built natively with Swift, SwiftUI, and AppKit, it combines real-time procedural music-box melodies, cozy hearth crackle synthesis, 3D rotating and 8-bit Pixel Art status icons, interactive falling snow, and top festoon lights.
+**Noël** is an artisanal macOS menu bar companion designed to bring warm, festive cheer to your workspace during the holiday season. Built natively with Swift, SwiftUI, and AppKit, it combines real-time procedural music-box melodies, cozy hearth crackle synthesis, stereo procedural winter wind, 3D rotating and 8-bit Pixel Art status icons, interactive falling snow, top festoon lights, and Santa's flying sleigh across your displays.
 
 <a id="quick-controls"></a>
 ### Quick Controls
@@ -130,23 +145,38 @@ Descarga [Noel.zip](https://github.com/Dmian0/noel/releases/latest/download/Noel
 | :--- | :--- |
 | **Left-click on menu bar icon** | Opens or closes the compact holiday popover with live Christmas countdown and audio player. |
 | **Right-click on menu bar icon** | Instantly toggles Play / Pause without expanding the popover panel. |
-| **Ambient pills (Snow, Lights, Hearth)** | Toggles click-through visual overlay layers and procedural fire crackle; reveals contextual sliders and patterns (Light, Medium, Blizzard snow; Twinkle, Wave, Warm glow lights). |
+| **Option (⌥) + Click on menu bar icon** | Toggles Meeting / Screen Sharing Mode (also available via the eye button in the panel header): instantly hides or resumes all visual screen overlays (snow, lights, sleigh) while preserving your active settings. |
+| **Ambient pills (Snow, Lights, Hearth)** | Toggles click-through visual overlay layers and procedural fire crackle; reveals contextual controls for snow intensity (`Light`, `Medium`, `Blizzard`), rendering layer (`Above all` / `Desktop`), independent procedural winter wind volume, lighting patterns (`Twinkle`, `Wave`, `Steady`, `Rhythm`), 5 color palettes, and independent `3D` / `Pixel Art` style selectors. |
+| **Snow & on-screen interactivity** | Hover over the bottom snowbank to clear a smooth path (interactive snowplow) or click-and-drag upward from the snow to shape and throw snowballs with realistic gravity against top garland lights (shaking bulbs and shattering icicles) or Santa's sleigh. |
+| **Santa's Sleigh** | Configure periodic flights (`Off`, `Occasional`, `Frequent`), toggle procedural sleigh bells, or press **Fly** to invoke Santa and his reindeer across the screen immediately. |
 | **Music folder picker** | Links any local folder containing MP3, M4A, WAV, or FLAC audio files alongside the 5 built-in procedural music-box melodies. |
 
 <a id="features"></a>
 ### Key Features
 
-- **Native Spotify & Apple Music Integration:**  
-  Source selector (`NOËL | SPOTIFY | APPLE MUSIC`) to sync the active track and artist in real time and control Play/Pause, Next, Previous, Shuffle, and Volume while keeping procedural fireplace hearth audio independent.
+- **Santa's Flying Sleigh:**  
+  Customizable periodic flight frequency (`Off`, `Occasional`, `Frequent`) or instant manual invocation via the **Fly** button. Santa, bright red-nosed Rudolph, and reindeer gallop across the entire screen along 4 organic flight trajectories (`diagonalClimb`, `panoramicWave`, `centerDive`, `sweepingArc`), leaving a golden stardust trail, dropping parachute gifts, and accompanied by procedural sleigh bells with stereo binaural panning. Hitting Santa with a snowball triggers an extra gift drop and sparkle burst.
 
-- **Multi-Display Support:**  
-  Display target selector (`All` / `Main`) extending falling snow and top holiday lights across all connected monitors, dynamically scaling snowflake density and light bulb counts to each screen's width.
+- **Interactive Snowfall, Physics & "Chameleon" Snowbank:**  
+  Three depth layers with up to 300 simultaneous flakes in `Blizzard` mode, diagonal wind gusts reactive to cursor movement, and progressive accumulation along the bottom screen edge. A continuous 44 pt seamless snowbank without column seams or gaps, featuring smooth Gaussian snowplow carving on mouse hover. Render layer selector (`Above all` / `Desktop`) to send snow behind open windows. Ultra-lean bitmap strip architecture with dirty-frame rendering keeping total RAM usage around ~40 MB.
+
+- **Festoon Garland with 5 Palettes, Icicles & Audio-Reactive `Rhythm`:**  
+  Top festoon garland featuring 5 handcrafted color palettes (*Classic Multicolor*, *Warm White*, *Candy Cane*, *Nordic Ice*, and *Pine & Gold*) with visual color dot swatches. Translucent icicles that form along the wire as it snows and shatter into frosted fragments when hit. A 4th lighting pattern, **`Rhythm`**, providing dual-band audio reactivity: real-time spectral measurement via `AVAudioPlayer` decibels for built-in tunes and rhythmic pulse synchronization with active playback in Spotify or Apple Music.
+
+- **Independent `Color 3D` & `Pixel Art` Styles:**  
+  Complete freedom to mix aesthetics: individually select `3D` or 8-bit `Pixel Art` rendering for snowflakes, the bottom snowbank, top garland lights, and the menu bar status icon/sleigh.
+
+- **Stereo Winter Wind & Everyday Convenience:**  
+  Real-time procedural winter wind synthesis using filtered pink noise, stochastic gusting, and stereo panning, featuring an independent volume slider and auto-activation in Blizzard mode. Instant `Option + Click` Meeting Mode (or header eye button) for calls and screen sharing, plus native launch at login toggle powered by `SMAppService` on macOS 13+.
+
+- **Native Spotify & Apple Music Integration:**  
+  Source selector (`NOËL | SPOTIFY | APPLE MUSIC`) to sync the active track and artist in real time and control Play/Pause, Next, Previous, Shuffle, and Volume while keeping procedural fireplace hearth and winter wind audio independent.
 
 - **Procedural Audio Synthesis:**  
   Five holiday tunes synthesized in real time (*Jingle Bells*, *We Wish You a Merry Christmas*, *Silent Night*, *Deck the Halls*, *Carol of the Bells*). Loopable 12-second procedural fireplace audio generating wood-burning crackles, pops, and warm low-frequency embers through stochastic algorithms without audio samples or network calls. Full support for local audio folders containing MP3, M4A, WAV, or FLAC tracks.
 
-- **Screen Overlays (Click-Through):**  
-  Full-screen transparent floating window hosting wind-blown procedural snowflakes (up to 260 flakes reacting to selected intensity: Light, Medium, or Blizzard). Scalloped holiday light garland along the top menu bar edge featuring Twinkle, Wave, and Warm steady illumination patterns.
+- **Multi-Display Support:**  
+  Display target selector (`All` / `Main`) extending falling snow, top festoon lights, and Santa's flight across all connected monitors, dynamically scaling snowflake density, bulb counts, and trajectory dimensions to each screen's resolution.
 
 - **Artisanal Craft & Design:**  
   Clean, typography-driven interface with zero emojis in UI strings. Pine Dark, Cream Light, and System Auto palettes that style both the view and native popover frame. Choose between American Typewriter and Optima typography. Five handcrafted status bar characters (*Pine Tree*, *Snowman*, *Rudolph Reindeer*, *Santa Hat*, *Hot Cocoa Mug*) in smooth 3D vector or 8-bit Pixel Art rendering. Optional compact countdown tag displayed beside the status icon.

@@ -1,4 +1,6 @@
 import AppKit
+import QuartzCore
+import Darwin
 
 /// Manages click-through transparent overlay windows for falling snow and top holiday lights.
 final class ScreenEffectsManager {
@@ -6,6 +8,8 @@ final class ScreenEffectsManager {
 
     private var snowEntries: [CGDirectDisplayID: (window: NSWindow, view: SnowOverlayView)] = [:]
     private var lightsEntries: [CGDirectDisplayID: (window: NSWindow, view: LightsOverlayView)] = [:]
+    private var santaEntries: [CGDirectDisplayID: (window: NSWindow, view: SantaSleighOverlayView)] = [:]
+    private var santaTimer: Timer?
 
     private init() {
         NotificationCenter.default.addObserver(
@@ -22,8 +26,16 @@ final class ScreenEffectsManager {
 
     func syncWithState() {
         let state = AppState.shared
-        updateSnow(enabled: state.isSnowing, intensity: state.snowIntensity, screenMode: state.screenTargetMode)
-        updateLights(enabled: state.showTopLights, pattern: state.lightsPattern, screenMode: state.screenTargetMode)
+        if state.isEffectsPausedForCall {
+            updateSnow(enabled: false, intensity: state.snowIntensity, screenMode: state.screenTargetMode, layerMode: state.snowLayerMode)
+            updateLights(enabled: false, pattern: state.lightsPattern, palette: state.lightsPalette, style: state.lightsStyle, screenMode: state.screenTargetMode)
+            updateSantaSchedule(frequency: .off, screenMode: state.screenTargetMode)
+            return
+        }
+
+        updateSnow(enabled: state.isSnowing, intensity: state.snowIntensity, screenMode: state.screenTargetMode, layerMode: state.snowLayerMode)
+        updateLights(enabled: state.showTopLights, pattern: state.lightsPattern, palette: state.lightsPalette, style: state.lightsStyle, screenMode: state.screenTargetMode)
+        updateSantaSchedule(frequency: state.santaFrequency, screenMode: state.screenTargetMode)
     }
 
     private func targetScreens(for mode: ScreenTargetMode) -> [(id: CGDirectDisplayID, screen: NSScreen)] {
@@ -52,13 +64,14 @@ final class ScreenEffectsManager {
 
     // MARK: - Snow Overlay
 
-    private func updateSnow(enabled: Bool, intensity: Double, screenMode: ScreenTargetMode) {
+    private func updateSnow(enabled: Bool, intensity: Double, screenMode: ScreenTargetMode, layerMode: SnowLayerMode) {
         if !enabled {
             for (_, entry) in snowEntries {
                 entry.view.stop()
                 entry.window.orderOut(nil)
             }
             snowEntries.removeAll()
+            malloc_zone_pressure_relief(nil, 0)
             return
         }
 
@@ -71,9 +84,14 @@ final class ScreenEffectsManager {
             snowEntries.removeValue(forKey: id)
         }
 
+        let targetLevel: NSWindow.Level = (layerMode == .desktopOnly)
+            ? NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.desktopIconWindow)) + 1)
+            : .floating
+
         for (id, screen) in targets {
             let frame = screen.frame
             if let entry = snowEntries[id] {
+                entry.window.level = targetLevel
                 entry.window.setFrame(frame, display: true)
                 entry.view.frame = NSRect(origin: .zero, size: frame.size)
                 entry.view.setIntensity(intensity)
@@ -86,11 +104,13 @@ final class ScreenEffectsManager {
                     backing: .buffered,
                     defer: false
                 )
+                win.colorSpace = .sRGB
+                win.depthLimit = .twentyfourBitRGB
                 win.isOpaque = false
                 win.backgroundColor = .clear
                 win.hasShadow = false
                 win.ignoresMouseEvents = true
-                win.level = .floating
+                win.level = targetLevel
                 win.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
 
                 let view = SnowOverlayView(frame: NSRect(origin: .zero, size: frame.size))
@@ -106,13 +126,14 @@ final class ScreenEffectsManager {
 
     // MARK: - Top Lights Garland Overlay
 
-    private func updateLights(enabled: Bool, pattern: LightsPattern, screenMode: ScreenTargetMode) {
+    private func updateLights(enabled: Bool, pattern: LightsPattern, palette: LightsPalette, style: IconStyle, screenMode: ScreenTargetMode) {
         if !enabled {
             for (_, entry) in lightsEntries {
                 entry.view.stop()
                 entry.window.orderOut(nil)
             }
             lightsEntries.removeAll()
+            malloc_zone_pressure_relief(nil, 0)
             return
         }
 
@@ -135,6 +156,8 @@ final class ScreenEffectsManager {
                 entry.window.setFrame(frame, display: true)
                 entry.view.frame = NSRect(origin: .zero, size: frame.size)
                 entry.view.pattern = pattern
+                entry.view.palette = palette
+                entry.view.lightsStyle = style
                 entry.view.start()
                 entry.window.orderFrontRegardless()
             } else {
@@ -144,6 +167,8 @@ final class ScreenEffectsManager {
                     backing: .buffered,
                     defer: false
                 )
+                win.colorSpace = .sRGB
+                win.depthLimit = .twentyfourBitRGB
                 win.isOpaque = false
                 win.backgroundColor = .clear
                 win.hasShadow = false
@@ -154,6 +179,8 @@ final class ScreenEffectsManager {
                 let view = LightsOverlayView(frame: NSRect(origin: .zero, size: frame.size))
                 win.contentView = view
                 view.pattern = pattern
+                view.palette = palette
+                view.lightsStyle = style
                 view.start()
                 win.orderFrontRegardless()
 
@@ -161,45 +188,359 @@ final class ScreenEffectsManager {
             }
         }
     }
-}
 
-// MARK: - Snow View
+    // MARK: - Santa Sleigh Overlay
 
-private final class SnowOverlayView: NSView {
-    private struct Snowflake {
-        var x: CGFloat
-        var y: CGFloat
-        var radius: CGFloat
-        var speedY: CGFloat
-        var driftPhase: Double
-        var driftSpeed: Double
-        var driftAmp: CGFloat
-        var opacity: CGFloat
-        var isCrystal: Bool
+    private func updateSantaSchedule(frequency: SantaFrequency, screenMode: ScreenTargetMode) {
+        santaTimer?.invalidate()
+        santaTimer = nil
+
+        let targets = targetScreens(for: screenMode)
+        let activeIDs = Set(targets.map { $0.id })
+        for (id, entry) in santaEntries where !activeIDs.contains(id) {
+            entry.view.stop()
+            entry.window.orderOut(nil)
+            santaEntries.removeValue(forKey: id)
+        }
+
+        guard let interval = frequency.intervalSeconds else {
+            for (_, entry) in santaEntries {
+                entry.view.stop()
+                entry.window.orderOut(nil)
+            }
+            santaEntries.removeAll()
+            return
+        }
+
+        let t = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
+            self?.triggerSantaFlightNow()
+        }
+        RunLoop.main.add(t, forMode: .common)
+        santaTimer = t
     }
 
-    private var flakes: [Snowflake] = []
+    func triggerSantaFlightNow() {
+        guard !AppState.shared.isEffectsPausedForCall else { return }
+        let targets = targetScreens(for: AppState.shared.screenTargetMode)
+        guard !targets.isEmpty else { return }
+
+        let leftToRight = Bool.random()
+        let style = AppState.shared.iconStyle
+        AudioManager.shared.playSleighBells(leftToRight: leftToRight)
+
+        for (id, screen) in targets {
+            let frame = screen.frame
+
+            let entry: (window: NSWindow, view: SantaSleighOverlayView)
+            if let existing = santaEntries[id] {
+                existing.window.setFrame(frame, display: true)
+                existing.view.frame = NSRect(origin: .zero, size: frame.size)
+                entry = existing
+            } else {
+                let win = NSWindow(
+                    contentRect: frame,
+                    styleMask: [.borderless],
+                    backing: .buffered,
+                    defer: false
+                )
+                win.colorSpace = .sRGB
+                win.depthLimit = .twentyfourBitRGB
+                win.isReleasedWhenClosed = false
+                win.isOpaque = false
+                win.backgroundColor = .clear
+                win.hasShadow = false
+                win.ignoresMouseEvents = true
+                win.level = .floating
+                win.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+
+                let view = SantaSleighOverlayView(frame: NSRect(origin: .zero, size: frame.size))
+                view.wantsLayer = true
+                view.layer?.contentsScale = 1.0
+                win.contentView = view
+                entry = (window: win, view: view)
+                santaEntries[id] = entry
+            }
+
+            entry.window.orderFrontRegardless()
+            entry.view.startFlight(leftToRight: leftToRight, style: style) { [weak self] in
+                guard let self = self else { return }
+                if let active = self.santaEntries.removeValue(forKey: id) {
+                    active.view.stop()
+                    active.window.orderOut(nil)
+                    active.window.close()
+                    malloc_zone_pressure_relief(nil, 0)
+                }
+            }
+        }
+    }
+
+    func handleSnowballImpact(atScreenPoint screenPt: NSPoint) -> Bool {
+        for (_, entry) in lightsEntries {
+            let localPt = entry.window.convertPoint(fromScreen: screenPt)
+            if localPt.x >= 0 && localPt.x <= entry.view.bounds.width && localPt.y >= -24 && localPt.y <= entry.view.bounds.height + 20 {
+                entry.view.applySnowballImpulse(atX: localPt.x)
+                return true
+            }
+        }
+        for (_, entry) in santaEntries {
+            if entry.view.handleSnowballImpact(at: screenPt) {
+                return true
+            }
+        }
+        return false
+    }
+}
+
+
+// MARK: - Top Lights View
+
+private final class LightsOverlayView: NSView {
+    var pattern: LightsPattern = .twinkle
+    var palette: LightsPalette = .classic
+    var lightsStyle: IconStyle = .colorful
+    private var lastWireStyle: IconStyle = .colorful
     private var timer: Timer?
-    private var targetCount: Int = 100
-    private var currentIntensity: Double = 0.6
     private var time: Double = 0
+    private var bulbAngles: [CGFloat] = []
+    private var bulbVelocities: [CGFloat] = []
+    private var bulbFlashes: [CGFloat] = []
+    private var icicleLengths: [CGFloat] = []
+    private var iceShards: [IceShard] = []
+    private var audioBass: Double = 0.25
+    private var audioTreble: Double = 0.25
+    private var audioActive: Bool = false
+    private var lastMouseX: CGFloat?
+    private var lastWireWidth: CGFloat = -1
+
+    private let wireLayer = CAShapeLayer()
+    private let frostWireLayer = CAShapeLayer()
+
+    private static let noAnimActions: [String: CAAction] = [
+        "position": NSNull(),
+        "bounds": NSNull(),
+        "opacity": NSNull(),
+        "contents": NSNull(),
+        "hidden": NSNull(),
+        "transform": NSNull(),
+        "backgroundColor": NSNull(),
+        "path": NSNull()
+    ]
+
+    private static func createIcicleImage() -> CGImage? {
+        let w = 8
+        let h = 32
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        guard let ctx = CGContext(
+            data: nil,
+            width: w,
+            height: h,
+            bitsPerComponent: 8,
+            bytesPerRow: w * 4,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return nil }
+
+        let midX = CGFloat(w) * 0.5
+        ctx.beginPath()
+        ctx.move(to: CGPoint(x: midX - 2.6, y: CGFloat(h)))
+        ctx.addLine(to: CGPoint(x: midX, y: 0))
+        ctx.addLine(to: CGPoint(x: midX + 2.6, y: CGFloat(h)))
+        ctx.closePath()
+        ctx.setFillColor(red: 0.86, green: 0.94, blue: 1.0, alpha: 0.85)
+        ctx.fillPath()
+
+        ctx.setStrokeColor(red: 1.0, green: 1.0, blue: 1.0, alpha: 0.90)
+        ctx.setLineWidth(0.8)
+        ctx.strokeLineSegments(between: [CGPoint(x: midX, y: CGFloat(h)), CGPoint(x: midX, y: 2.0)])
+        return ctx.makeImage()
+    }
+
+    private static func createPixelIcicleImage() -> CGImage? {
+        let w = 8
+        let h = 32
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        guard let ctx = CGContext(
+            data: nil,
+            width: w,
+            height: h,
+            bitsPerComponent: 8,
+            bytesPerRow: w * 4,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return nil }
+
+        ctx.setShouldAntialias(false)
+        ctx.setFillColor(red: 0.86, green: 0.94, blue: 1.0, alpha: 0.90)
+
+        ctx.fill(CGRect(x: 1, y: 26, width: 6, height: 6))
+        ctx.fill(CGRect(x: 2, y: 16, width: 4, height: 10))
+        ctx.fill(CGRect(x: 2, y: 8, width: 4, height: 8))
+        ctx.fill(CGRect(x: 3, y: 0, width: 2, height: 8))
+
+        ctx.setFillColor(red: 1.0, green: 1.0, blue: 1.0, alpha: 0.92)
+        ctx.fill(CGRect(x: 2, y: 12, width: 1, height: 16))
+        ctx.fill(CGRect(x: 3, y: 2, width: 1, height: 10))
+
+        return ctx.makeImage()
+    }
+
+    private static func createIceShardImage() -> CGImage? {
+        let size = 10
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        guard let ctx = CGContext(
+            data: nil,
+            width: size,
+            height: size,
+            bitsPerComponent: 8,
+            bytesPerRow: size * 4,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return nil }
+
+        let mid = CGFloat(size) * 0.5
+        ctx.beginPath()
+        ctx.move(to: CGPoint(x: mid, y: CGFloat(size)))
+        ctx.addLine(to: CGPoint(x: CGFloat(size) * 0.8, y: mid))
+        ctx.addLine(to: CGPoint(x: mid, y: 0))
+        ctx.addLine(to: CGPoint(x: CGFloat(size) * 0.2, y: mid))
+        ctx.closePath()
+        ctx.setFillColor(red: 0.88, green: 0.96, blue: 1.0, alpha: 0.90)
+        ctx.fillPath()
+        return ctx.makeImage()
+    }
+
+    private static func createPixelIceShardImage() -> CGImage? {
+        let size = 10
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        guard let ctx = CGContext(
+            data: nil,
+            width: size,
+            height: size,
+            bitsPerComponent: 8,
+            bytesPerRow: size * 4,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return nil }
+
+        ctx.setShouldAntialias(false)
+        ctx.setFillColor(red: 0.86, green: 0.94, blue: 1.0, alpha: 0.92)
+        ctx.fill(CGRect(x: 3, y: 1, width: 4, height: 8))
+        ctx.fill(CGRect(x: 1, y: 3, width: 8, height: 4))
+        ctx.setFillColor(red: 1.0, green: 1.0, blue: 1.0, alpha: 0.95)
+        ctx.fill(CGRect(x: 4, y: 4, width: 2, height: 2))
+
+        return ctx.makeImage()
+    }
+
+    private static let icicleImage: CGImage? = createIcicleImage()
+    private static let pixelIcicleImage: CGImage? = createPixelIcicleImage()
+    private static let iceShardImage: CGImage? = createIceShardImage()
+    private static let pixelIceShardImage: CGImage? = createPixelIceShardImage()
+
+    private final class BulbLayers {
+        let socketLayer = CALayer()
+        let dropWireLayer = CALayer()
+        let outerGlowLayer = CALayer()
+        let innerGlowLayer = CALayer()
+        let bulbLayer = CALayer()
+        let filamentLayer = CALayer()
+        let icicleLayer = CALayer()
+
+        init(root: CALayer, actions: [String: CAAction]) {
+            socketLayer.actions = actions
+            dropWireLayer.actions = actions
+            outerGlowLayer.actions = actions
+            innerGlowLayer.actions = actions
+            bulbLayer.actions = actions
+            filamentLayer.actions = actions
+            icicleLayer.actions = actions
+
+            socketLayer.bounds = CGRect(x: 0, y: 0, width: 4.0, height: 4.0)
+            socketLayer.cornerRadius = 0.8
+            socketLayer.backgroundColor = NSColor(calibratedRed: 0.12, green: 0.22, blue: 0.14, alpha: 0.95).cgColor
+
+            dropWireLayer.bounds = CGRect(x: 0, y: 0, width: 1.0, height: 8.2)
+            dropWireLayer.anchorPoint = CGPoint(x: 0.5, y: 1.0)
+            dropWireLayer.backgroundColor = NSColor(calibratedRed: 0.08, green: 0.24, blue: 0.12, alpha: 0.88).cgColor
+
+            bulbLayer.bounds = CGRect(x: 0, y: 0, width: 6.2, height: 8.6)
+            bulbLayer.cornerRadius = 3.1
+
+            filamentLayer.bounds = CGRect(x: 0, y: 0, width: 2.6, height: 3.6)
+            filamentLayer.cornerRadius = 1.3
+            filamentLayer.backgroundColor = NSColor.white.cgColor
+
+            icicleLayer.contents = LightsOverlayView.icicleImage
+            icicleLayer.anchorPoint = CGPoint(x: 0.5, y: 1.0)
+
+            root.addSublayer(outerGlowLayer)
+            root.addSublayer(innerGlowLayer)
+            root.addSublayer(socketLayer)
+            root.addSublayer(dropWireLayer)
+            root.addSublayer(bulbLayer)
+            root.addSublayer(filamentLayer)
+            root.addSublayer(icicleLayer)
+        }
+
+        func setHidden(_ hidden: Bool) {
+            socketLayer.isHidden = hidden
+            dropWireLayer.isHidden = hidden
+            outerGlowLayer.isHidden = hidden
+            innerGlowLayer.isHidden = hidden
+            bulbLayer.isHidden = hidden
+            filamentLayer.isHidden = hidden
+            icicleLayer.isHidden = hidden
+        }
+    }
+
+    private var bulbLayerPool: [BulbLayers] = []
+    private var shardLayerPool: [CALayer] = []
+
+    private struct IceShard {
+        var x: CGFloat
+        var y: CGFloat
+        var vx: CGFloat
+        var vy: CGFloat
+        var size: CGFloat
+        var opacity: CGFloat
+    }
 
     override var isOpaque: Bool { false }
 
-    func setIntensity(_ intensity: Double) {
-        currentIntensity = intensity
-        if intensity <= 0.4 {
-            targetCount = 42
-        } else if intensity <= 0.75 {
-            targetCount = 100
-        } else {
-            targetCount = 260
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layerContentsRedrawPolicy = .onSetNeedsDisplay
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        wantsLayer = true
+        layerContentsRedrawPolicy = .onSetNeedsDisplay
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        wantsLayer = true
+        guard let root = layer else { return }
+        root.contentsScale = 1.0
+        if wireLayer.superlayer == nil {
+            wireLayer.actions = Self.noAnimActions
+            wireLayer.fillColor = nil
+            wireLayer.strokeColor = NSColor(calibratedRed: 0.08, green: 0.24, blue: 0.12, alpha: 0.88).cgColor
+            wireLayer.lineWidth = 1.6
+            root.addSublayer(wireLayer)
+
+            frostWireLayer.actions = Self.noAnimActions
+            frostWireLayer.fillColor = nil
+            frostWireLayer.strokeColor = NSColor(calibratedRed: 0.90, green: 0.96, blue: 1.0, alpha: 0.75).cgColor
+            frostWireLayer.lineWidth = 0.9
+            frostWireLayer.isHidden = true
+            root.addSublayer(frostWireLayer)
         }
-        adjustFlakeCount()
     }
 
     func start() {
-        adjustFlakeCount()
         guard timer == nil else { return }
         let t = Timer(timeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
             self?.step()
@@ -211,172 +552,268 @@ private final class SnowOverlayView: NSView {
     func stop() {
         timer?.invalidate()
         timer = nil
+        bulbAngles.removeAll()
+        bulbVelocities.removeAll()
+        bulbFlashes.removeAll()
+        icicleLengths.removeAll()
+        iceShards.removeAll()
+        lastMouseX = nil
+        lastWireWidth = -1
+        lastWireStyle = .colorful
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        wireLayer.path = nil
+        frostWireLayer.path = nil
+        frostWireLayer.isHidden = true
+        for b in bulbLayerPool { b.setHidden(true) }
+        for s in shardLayerPool { s.isHidden = true }
+        CATransaction.commit()
+
+        malloc_zone_pressure_relief(nil, 0)
     }
 
-    private func adjustFlakeCount() {
-        let w = max(bounds.width, 800)
-        let h = max(bounds.height, 600)
-        while flakes.count < targetCount {
-            flakes.append(makeFlake(width: w, height: h, randomY: true))
-        }
-        if flakes.count > targetCount {
-            flakes.removeLast(flakes.count - targetCount)
+    func applySnowballImpulse(atX hitX: CGFloat) {
+        let count = bulbVelocities.count
+        for i in 0..<count {
+            let bulbRestX = CGFloat(i) * 42.0 + 21.0
+            let dist = abs(hitX - bulbRestX)
+            if dist < 95.0 {
+                let dir: CGFloat = (bulbRestX >= hitX) ? 1.0 : -1.0
+                let strength = (1.0 - dist / 95.0) * 0.48
+                bulbVelocities[i] += dir * strength + CGFloat.random(in: (-0.12)...0.12)
+                if i < bulbFlashes.count {
+                    bulbFlashes[i] = min(1.0, max(bulbFlashes[i], (1.0 - dist / 95.0) * 1.15))
+                }
+                if i < icicleLengths.count && icicleLengths[i] > 3.0 && dist < 85.0 {
+                    icicleLengths[i] = 0
+                    let icicleX = CGFloat(i) * 42.0 + 5.0
+                    let icicleY = bounds.height - 9.0
+                    for _ in 0..<5 {
+                        iceShards.append(IceShard(
+                            x: icicleX + CGFloat.random(in: (-3.0)...3.0),
+                            y: icicleY + CGFloat.random(in: (-2.0)...1.0),
+                            vx: CGFloat.random(in: (-2.5)...2.5),
+                            vy: CGFloat.random(in: (-3.5)...(-0.8)),
+                            size: CGFloat.random(in: 2.0...4.0),
+                            opacity: CGFloat.random(in: 0.7...0.95)
+                        ))
+                    }
+                }
+            }
         }
     }
 
-    private func makeFlake(width: CGFloat, height: CGFloat, randomY: Bool) -> Snowflake {
-        let radius = CGFloat.random(in: 1.6...4.6)
-        return Snowflake(
-            x: CGFloat.random(in: 0...width),
-            y: randomY ? CGFloat.random(in: 0...height) : height + CGFloat.random(in: 4...24),
-            radius: radius,
-            speedY: CGFloat.random(in: 0.75...2.35) * (0.65 + radius * 0.14),
-            driftPhase: Double.random(in: 0...(2 * .pi)),
-            driftSpeed: Double.random(in: 0.8...2.1),
-            driftAmp: CGFloat.random(in: 0.25...0.95),
-            opacity: CGFloat.random(in: 0.42...0.88),
-            isCrystal: radius > 3.6 && Int.random(in: 0...3) == 0
-        )
+    private func colors(for palette: LightsPalette) -> [NSColor] {
+        switch palette {
+        case .classic:
+            return [
+                NSColor(calibratedRed: 1.00, green: 0.22, blue: 0.22, alpha: 1.0), // Rojo
+                NSColor(calibratedRed: 1.00, green: 0.80, blue: 0.16, alpha: 1.0), // Dorado Calido
+                NSColor(calibratedRed: 0.18, green: 0.86, blue: 0.36, alpha: 1.0), // Esmeralda
+                NSColor(calibratedRed: 0.24, green: 0.72, blue: 1.00, alpha: 1.0), // Azul Hielo
+                NSColor(calibratedRed: 1.00, green: 0.94, blue: 0.76, alpha: 1.0)  // Blanco Calido
+            ]
+        case .warm:
+            return [
+                NSColor(calibratedRed: 1.00, green: 0.78, blue: 0.32, alpha: 1.0), // Ambar Calido
+                NSColor(calibratedRed: 1.00, green: 0.86, blue: 0.52, alpha: 1.0), // Oro Viejo
+                NSColor(calibratedRed: 1.00, green: 0.95, blue: 0.80, alpha: 1.0)  // Blanco Incandescente
+            ]
+        case .candyCane:
+            return [
+                NSColor(calibratedRed: 0.96, green: 0.14, blue: 0.20, alpha: 1.0), // Rojo Carmesi
+                NSColor(calibratedRed: 0.98, green: 0.98, blue: 1.00, alpha: 1.0), // Blanco Nieve
+                NSColor(calibratedRed: 1.00, green: 0.30, blue: 0.36, alpha: 1.0), // Rojo Menta
+                NSColor(calibratedRed: 0.98, green: 0.98, blue: 1.00, alpha: 1.0)  // Blanco Nieve
+            ]
+        case .nordicIce:
+            return [
+                NSColor(calibratedRed: 0.20, green: 0.62, blue: 0.98, alpha: 1.0), // Azul Artico
+                NSColor(calibratedRed: 0.48, green: 0.88, blue: 1.00, alpha: 1.0), // Cian Glaciar
+                NSColor(calibratedRed: 0.92, green: 0.98, blue: 1.00, alpha: 1.0), // Blanco Escarcha
+                NSColor(calibratedRed: 0.35, green: 0.76, blue: 1.00, alpha: 1.0)  // Azul Cielo
+            ]
+        case .pineGold:
+            return [
+                NSColor(calibratedRed: 0.14, green: 0.68, blue: 0.36, alpha: 1.0), // Verde Pino
+                NSColor(calibratedRed: 0.95, green: 0.78, blue: 0.24, alpha: 1.0), // Oro Laton
+                NSColor(calibratedRed: 1.00, green: 0.92, blue: 0.70, alpha: 1.0), // Champan
+                NSColor(calibratedRed: 0.10, green: 0.52, blue: 0.28, alpha: 1.0)  // Esmeralda Bosque
+            ]
+        }
     }
 
     private func step() {
-        let w = bounds.width
-        let h = bounds.height
-        guard w > 0, h > 0 else { return }
-
         time += 1.0 / 30.0
 
-        let speedMult: CGFloat
-        let windGust: CGFloat
-        if currentIntensity <= 0.4 {
-            speedMult = 0.70
-            windGust = 0.0
-        } else if currentIntensity <= 0.75 {
-            speedMult = 1.05
-            windGust = 0.15
+        let count = Int(max(bounds.width, 800) / 42.0) + 2
+        if bulbAngles.count != count {
+            bulbAngles = Array(repeating: 0, count: count)
+            bulbVelocities = Array(repeating: 0, count: count)
+        }
+        if bulbFlashes.count != count {
+            bulbFlashes = Array(repeating: 0, count: count)
+        }
+        if icicleLengths.count != count {
+            icicleLengths = Array(repeating: 0, count: count)
+        }
+
+        let mousePt = window?.convertPoint(fromScreen: NSEvent.mouseLocation)
+        if let mp = mousePt {
+            let mouseDX = mp.x - (lastMouseX ?? mp.x)
+            lastMouseX = mp.x
+
+            if mp.y >= -15 && mp.y <= bounds.height + 15 {
+                let impulse = max(-0.22, min(0.22, mouseDX * 0.015))
+                for i in 0..<count {
+                    let bulbRestX = CGFloat(i) * 42.0 + 21.0
+                    if abs(mp.x - bulbRestX) < 32.0 {
+                        bulbVelocities[i] += impulse
+                    }
+                }
+            }
         } else {
-            speedMult = 2.25
-            windGust = CGFloat(2.2 + 1.4 * sin(time * 1.3))
+            lastMouseX = nil
         }
 
-        for i in 0..<flakes.count {
-            flakes[i].y -= flakes[i].speedY * speedMult
-            flakes[i].x += windGust + CGFloat(sin(time * flakes[i].driftSpeed + flakes[i].driftPhase)) * flakes[i].driftAmp * (currentIntensity > 0.75 ? 1.6 : 1.0)
+        for i in 0..<count {
+            bulbVelocities[i] = (bulbVelocities[i] - 0.18 * bulbAngles[i]) * 0.88
+            bulbAngles[i] = max(-0.65, min(0.65, bulbAngles[i] + bulbVelocities[i]))
+            bulbFlashes[i] *= 0.88
+        }
 
-            if flakes[i].y < -10 {
-                flakes[i] = makeFlake(width: w, height: h, randomY: false)
+        // Crecimiento y derretimiento de carambanos
+        if AppState.shared.isSnowing {
+            let maxLen: CGFloat = (AppState.shared.snowIntensity >= 0.85) ? 15.0 : 9.5
+            for i in 0..<count {
+                let targetRatio = 0.45 + 0.55 * abs(sin(Double(i) * 1.7 + 0.5))
+                let targetLen = maxLen * CGFloat(targetRatio)
+                if icicleLengths[i] < targetLen {
+                    icicleLengths[i] = min(targetLen, icicleLengths[i] + 0.06)
+                }
             }
-            if flakes[i].x < -10 { flakes[i].x = w + 5 }
-            if flakes[i].x > w + 10 { flakes[i].x = -5 }
-        }
-        needsDisplay = true
-    }
-
-    override func draw(_ dirtyRect: NSRect) {
-        NSColor.clear.setFill()
-        dirtyRect.fill()
-
-        for flake in flakes {
-            if flake.isCrystal {
-                drawCrystalFlake(flake)
-            } else {
-                NSColor.white.withAlphaComponent(flake.opacity).setFill()
-                let rect = NSRect(
-                    x: flake.x - flake.radius,
-                    y: flake.y - flake.radius,
-                    width: flake.radius * 2,
-                    height: flake.radius * 2
-                )
-                NSBezierPath(ovalIn: rect).fill()
+        } else {
+            for i in 0..<count {
+                icicleLengths[i] = max(0, icicleLengths[i] - 0.12)
             }
         }
-    }
 
-    private func drawCrystalFlake(_ flake: Snowflake) {
-        let path = NSBezierPath()
-        let r = flake.radius * 1.25
-        for arm in 0..<3 {
-            let angle = CGFloat(arm) * (.pi / 3.0)
-            let dx = cos(angle) * r
-            let dy = sin(angle) * r
-            path.move(to: NSPoint(x: flake.x - dx, y: flake.y - dy))
-            path.line(to: NSPoint(x: flake.x + dx, y: flake.y + dy))
+        // Actualizar posicion y opacidad de iceShards
+        var nextShards: [IceShard] = []
+        for var shard in iceShards {
+            shard.x += shard.vx
+            shard.y += shard.vy
+            shard.vy -= 0.45
+            shard.opacity -= 0.035
+            if shard.y >= -6.0 && shard.opacity > 0.02 {
+                nextShards.append(shard)
+            }
         }
-        path.lineWidth = 1.0
-        path.lineCapStyle = .round
-        NSColor.white.withAlphaComponent(flake.opacity * 0.92).setStroke()
-        path.stroke()
-    }
-}
+        iceShards = nextShards
 
-// MARK: - Top Lights View
+        // Modo Ritmo (Audio-Reactivo)
+        if pattern == .rhythm {
+            let levels = AudioManager.shared.currentAudioLevels(at: time)
+            audioBass = levels.bass
+            audioTreble = levels.treble
+            audioActive = levels.isActive
 
-private final class LightsOverlayView: NSView {
-    var pattern: LightsPattern = .twinkle
-    private var timer: Timer?
-    private var time: Double = 0
-
-    private let bulbPalette: [NSColor] = [
-        NSColor(calibratedRed: 1.00, green: 0.22, blue: 0.22, alpha: 1.0), // Red
-        NSColor(calibratedRed: 1.00, green: 0.80, blue: 0.16, alpha: 1.0), // Warm Gold
-        NSColor(calibratedRed: 0.18, green: 0.86, blue: 0.36, alpha: 1.0), // Emerald
-        NSColor(calibratedRed: 0.24, green: 0.72, blue: 1.00, alpha: 1.0), // Ice Blue
-        NSColor(calibratedRed: 1.00, green: 0.94, blue: 0.76, alpha: 1.0)  // Warm White
-    ]
-
-    override var isOpaque: Bool { false }
-
-    func start() {
-        guard timer == nil else { return }
-        let t = Timer(timeInterval: 1.0 / 20.0, repeats: true) { [weak self] _ in
-            self?.time += 0.05
-            self?.needsDisplay = true
+            if audioActive && audioBass > 0.70 {
+                let bassImpulse = CGFloat((audioBass - 0.70) * 0.08)
+                for i in 0..<count {
+                    let dir: CGFloat = (i % 2 == 0) ? 1.0 : -1.0
+                    bulbVelocities[i] += dir * bassImpulse
+                }
+            }
+        } else {
+            audioActive = false
         }
-        RunLoop.main.add(t, forMode: .common)
-        timer = t
-    }
 
-    func stop() {
-        timer?.invalidate()
-        timer = nil
-    }
+        guard let root = layer else { return }
 
-    override func draw(_ dirtyRect: NSRect) {
-        NSColor.clear.setFill()
-        dirtyRect.fill()
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
 
         let w = bounds.width
         let h = bounds.height
-        guard w > 20, h > 10 else { return }
+        if (abs(lastWireWidth - w) > 0.5 || lastWireStyle != lightsStyle) && w > 20 && h > 10 {
+            lastWireWidth = w
+            lastWireStyle = lightsStyle
+            let spacing: CGFloat = 42.0
+            let festoonCount = Int(w / spacing) + 2
+
+            let wirePath = CGMutablePath()
+            let frostPath = CGMutablePath()
+
+            if lightsStyle == .pixelArt {
+                wirePath.move(to: CGPoint(x: 0, y: h - 2))
+                frostPath.move(to: CGPoint(x: 0, y: h - 1.5))
+                for i in 0..<festoonCount {
+                    let xStart = CGFloat(i) * spacing
+                    var currYWire = h - 2
+                    var currYFrost = h - 1.5
+
+                    for stepIdx in 0..<14 {
+                        let t = (Double(stepIdx) + 0.5) / 14.0
+                        let dip = sin(t * .pi) * 7.0
+                        let dipRounded = CGFloat(round(dip / 3.0) * 3.0)
+                        let nextX = xStart + CGFloat(stepIdx + 1) * 3.0
+                        let nextYWire = (h - 2) - dipRounded
+                        let nextYFrost = (h - 1.5) - dipRounded
+
+                        wirePath.addLine(to: CGPoint(x: nextX, y: currYWire))
+                        wirePath.addLine(to: CGPoint(x: nextX, y: nextYWire))
+                        currYWire = nextYWire
+
+                        frostPath.addLine(to: CGPoint(x: nextX, y: currYFrost))
+                        frostPath.addLine(to: CGPoint(x: nextX, y: nextYFrost))
+                        currYFrost = nextYFrost
+                    }
+                    wirePath.addLine(to: CGPoint(x: xStart + spacing, y: h - 2))
+                    frostPath.addLine(to: CGPoint(x: xStart + spacing, y: h - 1.5))
+                }
+            } else {
+                wirePath.move(to: CGPoint(x: 0, y: h - 2))
+                frostPath.move(to: CGPoint(x: 0, y: h - 1.5))
+                for i in 0..<festoonCount {
+                    let xStart = CGFloat(i) * spacing
+                    let xEnd = xStart + spacing
+                    let xMid = (xStart + xEnd) * 0.5
+                    wirePath.addCurve(
+                        to: CGPoint(x: xEnd, y: h - 2),
+                        control1: CGPoint(x: xMid - spacing * 0.2, y: h - 11),
+                        control2: CGPoint(x: xMid + spacing * 0.2, y: h - 11)
+                    )
+                    frostPath.addCurve(
+                        to: CGPoint(x: xEnd, y: h - 1.5),
+                        control1: CGPoint(x: xMid - spacing * 0.2, y: h - 10.5),
+                        control2: CGPoint(x: xMid + spacing * 0.2, y: h - 10.5)
+                    )
+                }
+            }
+            wireLayer.path = wirePath
+            frostWireLayer.path = frostPath
+        }
+
+        frostWireLayer.isHidden = !AppState.shared.isSnowing
 
         let spacing: CGFloat = 42.0
-        let count = Int(w / spacing) + 2
+        let activePalette = colors(for: palette)
 
-        // 1. Dark pine wire festooned along the top
-        let wire = NSBezierPath()
-        wire.lineWidth = 1.6
-        wire.move(to: NSPoint(x: 0, y: h - 2))
-        for i in 0..<count {
-            let xStart = CGFloat(i) * spacing
-            let xEnd = xStart + spacing
-            let xMid = (xStart + xEnd) * 0.5
-            wire.curve(
-                to: NSPoint(x: xEnd, y: h - 2),
-                controlPoint1: NSPoint(x: xMid - spacing * 0.2, y: h - 11),
-                controlPoint2: NSPoint(x: xMid + spacing * 0.2, y: h - 11)
-            )
+        while bulbLayerPool.count < count {
+            bulbLayerPool.append(BulbLayers(root: root, actions: Self.noAnimActions))
         }
-        NSColor(calibratedRed: 0.08, green: 0.24, blue: 0.12, alpha: 0.88).setStroke()
-        wire.stroke()
 
-        // 2. Bulbs hanging at each festoon midpoint
+        let socketTopY = h - 7.5
         for i in 0..<count {
             let x = CGFloat(i) * spacing + spacing * 0.5
-            if x > w + 12 { break }
+            if x > w + 12 {
+                bulbLayerPool[i].setHidden(true)
+                continue
+            }
 
-            let baseColor = (pattern == .warmSteady)
-                ? NSColor(calibratedRed: 1.0, green: 0.86, blue: 0.52, alpha: 1.0)
-                : bulbPalette[i % bulbPalette.count]
+            let baseColor = activePalette[i % activePalette.count]
 
             let brightness: Double
             switch pattern {
@@ -386,37 +823,118 @@ private final class LightsOverlayView: NSView {
                 brightness = 0.30 + 0.70 * (0.5 + 0.5 * sin(time * 3.8 - Double(i) * 0.55))
             case .warmSteady:
                 brightness = 0.78 + 0.16 * sin(time * 1.2 + Double(i) * 0.4)
+            case .rhythm:
+                let centerDistRatio = abs(Double(x - w * 0.5) / Double(max(w * 0.5, 1.0)))
+                if i % 2 == 0 {
+                    let waveComponent = 0.5 + 0.5 * sin(time * 7.5 - centerDistRatio * 4.5)
+                    brightness = 0.30 + 0.70 * (audioActive ? (0.65 * audioBass + 0.35 * waveComponent) : waveComponent)
+                } else {
+                    let flashComponent = abs(sin(time * 12.0 + Double(i) * 0.9))
+                    brightness = 0.30 + 0.70 * (audioActive ? (0.65 * audioTreble + 0.35 * flashComponent) : flashComponent)
+                }
             }
 
-            let socketTopY = h - 7.5
-            // Socket
-            NSColor(calibratedRed: 0.12, green: 0.22, blue: 0.14, alpha: 0.95).setFill()
-            NSBezierPath(roundedRect: NSRect(x: x - 2.0, y: socketTopY - 3.5, width: 4.0, height: 4.0), xRadius: 0.8, yRadius: 0.8).fill()
+            let flash = i < bulbFlashes.count ? Double(bulbFlashes[i]) : 0.0
+            let totalBrightness = min(1.55, brightness + flash * 0.65)
 
-            let bulbCenterY = socketTopY - 7.8
-            let glowRadius: CGFloat = 11.5 * CGFloat(0.7 + 0.35 * brightness)
-            let glowRect = NSRect(
-                x: x - glowRadius,
-                y: bulbCenterY - glowRadius,
-                width: glowRadius * 2,
-                height: glowRadius * 2
-            )
+            let angle = i < bulbAngles.count ? bulbAngles[i] : 0
+            let bulbX = x + sin(angle) * 8.5
+            let bulbCenterY = socketTopY - cos(angle) * 7.8
 
-            if let gradient = NSGradient(colors: [
-                baseColor.withAlphaComponent(CGFloat(0.55 * brightness)),
-                baseColor.withAlphaComponent(0.0)
-            ]) {
-                gradient.draw(in: NSBezierPath(ovalIn: glowRect), relativeCenterPosition: .zero)
+            let bulb = bulbLayerPool[i]
+            bulb.setHidden(false)
+
+            bulb.socketLayer.position = CGPoint(x: x, y: socketTopY - 1.5)
+
+            bulb.dropWireLayer.position = CGPoint(x: x, y: socketTopY - 2.0)
+            bulb.dropWireLayer.transform = CATransform3DMakeRotation(angle, 0, 0, 1)
+
+            let glowRadius = 11.5 * CGFloat(0.7 + 0.35 * totalBrightness)
+            let glowAlpha = min(0.95, 0.55 * totalBrightness)
+
+            bulb.outerGlowLayer.bounds = CGRect(x: 0, y: 0, width: glowRadius * 2, height: glowRadius * 2)
+            bulb.outerGlowLayer.position = CGPoint(x: bulbX, y: bulbCenterY)
+            bulb.outerGlowLayer.backgroundColor = baseColor.cgColor
+            bulb.outerGlowLayer.opacity = Float(glowAlpha * 0.22)
+
+            let innerRadius = glowRadius * 0.58
+            bulb.innerGlowLayer.bounds = CGRect(x: 0, y: 0, width: innerRadius * 2, height: innerRadius * 2)
+            bulb.innerGlowLayer.position = CGPoint(x: bulbX, y: bulbCenterY)
+            bulb.innerGlowLayer.backgroundColor = baseColor.cgColor
+            bulb.innerGlowLayer.opacity = Float(glowAlpha * 0.48)
+
+            bulb.bulbLayer.position = CGPoint(x: bulbX, y: bulbCenterY)
+            bulb.bulbLayer.backgroundColor = baseColor.cgColor
+            bulb.bulbLayer.opacity = Float(min(1.0, 0.55 + 0.45 * totalBrightness))
+
+            let filamentAlpha = Float(min(1.0, 0.55 * totalBrightness + flash * 0.35))
+            bulb.filamentLayer.position = CGPoint(x: bulbX, y: bulbCenterY)
+            bulb.filamentLayer.opacity = filamentAlpha
+
+            if lightsStyle == .pixelArt {
+                bulb.socketLayer.cornerRadius = 0
+                bulb.dropWireLayer.bounds = CGRect(x: 0, y: 0, width: 2.0, height: 8.2)
+                bulb.bulbLayer.bounds = CGRect(x: 0, y: 0, width: 7.0, height: 9.0)
+                bulb.bulbLayer.cornerRadius = 1.0
+                bulb.filamentLayer.bounds = CGRect(x: 0, y: 0, width: 3.0, height: 3.0)
+                bulb.filamentLayer.cornerRadius = 0
+                bulb.outerGlowLayer.cornerRadius = 3.0
+                bulb.innerGlowLayer.cornerRadius = 2.0
+                bulb.icicleLayer.contents = Self.pixelIcicleImage
+                bulb.icicleLayer.magnificationFilter = .nearest
+            } else {
+                bulb.socketLayer.cornerRadius = 0.8
+                bulb.dropWireLayer.bounds = CGRect(x: 0, y: 0, width: 1.0, height: 8.2)
+                bulb.bulbLayer.bounds = CGRect(x: 0, y: 0, width: 6.2, height: 8.6)
+                bulb.bulbLayer.cornerRadius = 3.1
+                bulb.filamentLayer.bounds = CGRect(x: 0, y: 0, width: 2.6, height: 3.6)
+                bulb.filamentLayer.cornerRadius = 1.3
+                bulb.outerGlowLayer.cornerRadius = glowRadius
+                bulb.innerGlowLayer.cornerRadius = innerRadius
+                bulb.icicleLayer.contents = Self.icicleImage
+                bulb.icicleLayer.magnificationFilter = .linear
             }
 
-            // Bulb glass
-            let bulbRect = NSRect(x: x - 3.1, y: bulbCenterY - 4.3, width: 6.2, height: 8.6)
-            baseColor.withAlphaComponent(CGFloat(0.55 + 0.45 * brightness)).setFill()
-            NSBezierPath(ovalIn: bulbRect).fill()
-
-            // Bright filament core
-            NSColor.white.withAlphaComponent(CGFloat(0.55 * brightness)).setFill()
-            NSBezierPath(ovalIn: NSRect(x: x - 1.3, y: bulbCenterY - 1.8, width: 2.6, height: 3.6)).fill()
+            if i < icicleLengths.count && icicleLengths[i] > 0.8 {
+                let len = icicleLengths[i]
+                let icicleX = CGFloat(i) * spacing + spacing * 0.12
+                let topY = h - 3.5
+                bulb.icicleLayer.isHidden = false
+                bulb.icicleLayer.bounds = CGRect(x: 0, y: 0, width: 6.0, height: len)
+                bulb.icicleLayer.position = CGPoint(x: icicleX, y: topY)
+                bulb.icicleLayer.opacity = 0.88
+            } else {
+                bulb.icicleLayer.isHidden = true
+            }
         }
+
+        for i in count..<bulbLayerPool.count {
+            bulbLayerPool[i].setHidden(true)
+        }
+
+        while shardLayerPool.count < iceShards.count {
+            let l = CALayer()
+            l.actions = Self.noAnimActions
+            l.anchorPoint = CGPoint(x: 0.5, y: 0.5)
+            root.addSublayer(l)
+            shardLayerPool.append(l)
+        }
+
+        for i in 0..<iceShards.count {
+            let shard = iceShards[i]
+            let l = shardLayerPool[i]
+            l.isHidden = false
+            l.contents = (lightsStyle == .pixelArt) ? Self.pixelIceShardImage : Self.iceShardImage
+            l.magnificationFilter = (lightsStyle == .pixelArt) ? .nearest : .linear
+            l.bounds = CGRect(x: 0, y: 0, width: shard.size * 2.0, height: shard.size * 2.0)
+            l.position = CGPoint(x: shard.x, y: shard.y)
+            l.opacity = Float(shard.opacity)
+        }
+
+        for i in iceShards.count..<shardLayerPool.count {
+            shardLayerPool[i].isHidden = true
+        }
+
+        CATransaction.commit()
     }
 }

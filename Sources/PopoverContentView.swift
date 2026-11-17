@@ -154,6 +154,20 @@ struct PopoverContentView: View {
 
             // Right: Theme cycle, Language toggle, Settings button
             HStack(spacing: 7) {
+                // Meeting Mode (Option+Click screen effects pause/resume)
+                Button(action: {
+                    state.toggleEffectsPausedForCall()
+                }) {
+                    Image(systemName: state.isEffectsPausedForCall ? "eye.slash.fill" : "eye")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(state.isEffectsPausedForCall ? accentRedColor : secondaryTextColor)
+                        .frame(width: 22, height: 22)
+                        .background(state.isEffectsPausedForCall ? accentRedColor.opacity(0.15) : surfaceCardColor)
+                        .cornerRadius(4)
+                }
+                .buttonStyle(.plain)
+                .help(isEn ? "Pause/Resume screen effects (Option+Click)" : "Pausar/Reanudar efectos de pantalla (Option+Clic)")
+
                 // Theme button
                 Button(action: cycleTheme) {
                     Image(systemName: themeIconName)
@@ -218,13 +232,54 @@ struct PopoverContentView: View {
 
             ThemeDivider(isDark: isDark)
 
+            // Meeting Mode paused banner
+            if state.isEffectsPausedForCall {
+                HStack(spacing: 8) {
+                    Image(systemName: "eye.slash.fill")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(accentRedColor)
+
+                    Text(isEn ? "Effects paused (Meeting Mode)" : "Efectos ocultos (En Llamada)")
+                        .font(monoFont(size: 9.5, weight: .medium))
+                        .foregroundColor(primaryTextColor)
+
+                    Spacer(minLength: 4)
+
+                    Button(action: { state.isEffectsPausedForCall = false }) {
+                        Text(isEn ? "Resume" : "Reanudar")
+                            .font(monoFont(size: 8.5, weight: .bold))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2.5)
+                            .background(accentRedColor.opacity(isDark ? 0.35 : 0.18))
+                            .foregroundColor(isDark ? Color(hex: 0xF4EFE6) : accentRedColor)
+                            .cornerRadius(3)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 3)
+                                    .stroke(accentRedColor.opacity(isDark ? 0.6 : 0.4), lineWidth: 0.8)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, 9)
+                .padding(.vertical, 6)
+                .background(surfaceCardColor)
+                .cornerRadius(5)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 5)
+                        .stroke(accentRedColor.opacity(0.35), lineWidth: 1)
+                )
+            }
+
             // 3 Tactile Ambience Pills
             ambiencePillsRow
 
             // Contextual controls for active effects
-            if state.isSnowing || state.showTopLights || audio.isFireplacePlaying {
+            if state.isSnowing || state.showTopLights || audio.isFireplacePlaying || audio.isWindPlaying {
                 activeEffectsContextualSection
             }
+
+            // Santa Sleigh Section
+            santaSleighSection
         }
     }
 
@@ -287,7 +342,7 @@ struct PopoverContentView: View {
     private var heroVinylTrackSection: some View {
         HStack(spacing: 12) {
             // 56x56 Rotating Vinyl Record
-            TimelineView(.animation(minimumInterval: 0.05)) { context in
+            TimelineView(.animation(minimumInterval: 0.08, paused: !audio.isPlaying)) { context in
                 let time = context.date.timeIntervalSinceReferenceDate
                 let angle = audio.isPlaying ? (time * 90.0).truncatingRemainder(dividingBy: 360.0) : 0
                 VinylRecordView(
@@ -634,10 +689,116 @@ struct PopoverContentView: View {
                         }
                     }
                 }
+
+                // Snow layer mode row
+                HStack(spacing: 6) {
+                    Image(systemName: "square.2.layers.3d")
+                        .font(.system(size: 9.5))
+                        .foregroundColor(isDark ? Color(hex: 0x89C4E1) : Color(hex: 0x1D3B2E))
+
+                    Text(isEn ? "LAYER" : "CAPA")
+                        .font(monoFont(size: 8.5, weight: .bold))
+                        .foregroundColor(secondaryTextColor)
+
+                    Spacer()
+
+                    HStack(spacing: 3) {
+                        ForEach(SnowLayerMode.allCases) { mode in
+                            let isSelected = state.snowLayerMode == mode
+                            Button(action: { state.snowLayerMode = mode }) {
+                                Text(mode.displayName(in: state.language))
+                                    .font(monoFont(size: 8.5, weight: isSelected ? .bold : .regular))
+                                    .padding(.horizontal, 5)
+                                    .padding(.vertical, 2)
+                                    .background(isSelected ? (isDark ? Color(hex: 0x89C4E1).opacity(0.3) : Color(hex: 0x1D3B2E)) : surfaceCardColor)
+                                    .foregroundColor(isSelected ? (isDark ? Color(hex: 0x89C4E1) : Color(hex: 0xF6F0E4)) : secondaryTextColor)
+                                    .cornerRadius(3)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+
+                // Snow style row (Flakes 3D/PX + Base 3D/PX)
+                HStack(spacing: 6) {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 9.5))
+                        .foregroundColor(isDark ? Color(hex: 0x89C4E1) : Color(hex: 0x1D3B2E))
+
+                    Text(isEn ? "STYLE" : "ESTILO")
+                        .font(monoFont(size: 8.5, weight: .bold))
+                        .foregroundColor(secondaryTextColor)
+
+                    Spacer(minLength: 4)
+
+                    HStack(spacing: 6) {
+                        // Flakes group
+                        HStack(spacing: 3) {
+                            Text(isEn ? "Flakes" : "Copos")
+                                .font(monoFont(size: 7.5, weight: .medium))
+                                .foregroundColor(secondaryTextColor)
+
+                            snowStyleButton(title: "3D", isSelected: state.snowflakesStyle == .colorful) {
+                                state.snowflakesStyle = .colorful
+                            }
+                            snowStyleButton(title: "PX", isSelected: state.snowflakesStyle == .pixelArt) {
+                                state.snowflakesStyle = .pixelArt
+                            }
+                        }
+
+                        // Base group
+                        HStack(spacing: 3) {
+                            Text("Base")
+                                .font(monoFont(size: 7.5, weight: .medium))
+                                .foregroundColor(secondaryTextColor)
+
+                            snowStyleButton(title: "3D", isSelected: state.snowbankStyle == .colorful) {
+                                state.snowbankStyle = .colorful
+                            }
+                            snowStyleButton(title: "PX", isSelected: state.snowbankStyle == .pixelArt) {
+                                state.snowbankStyle = .pixelArt
+                            }
+                        }
+                    }
+                }
             }
 
-            // Lights pattern row
+            // Winter wind row
+            if state.isSnowing || audio.isWindPlaying {
+                HStack(spacing: 6) {
+                    Image(systemName: "wind")
+                        .font(.system(size: 9.5))
+                        .foregroundColor(isDark ? Color(hex: 0x89C4E1) : Color(hex: 0x1D3B2E))
+
+                    Text(isEn ? "WIND" : "VIENTO")
+                        .font(monoFont(size: 8.5, weight: .bold))
+                        .foregroundColor(secondaryTextColor)
+
+                    if !audio.isWindPlaying {
+                        Spacer()
+                    }
+
+                    Button(action: { audio.toggleWind() }) {
+                        Text(audio.isWindPlaying ? (isEn ? "ON" : "ACTIVO") : (isEn ? "OFF" : "NO"))
+                            .font(monoFont(size: 8.5, weight: audio.isWindPlaying ? .bold : .regular))
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 2)
+                            .background(audio.isWindPlaying ? (isDark ? Color(hex: 0x89C4E1).opacity(0.3) : Color(hex: 0x1D3B2E)) : surfaceCardColor)
+                            .foregroundColor(audio.isWindPlaying ? (isDark ? Color(hex: 0x89C4E1) : Color(hex: 0xF6F0E4)) : secondaryTextColor)
+                            .cornerRadius(3)
+                    }
+                    .buttonStyle(.plain)
+
+                    if audio.isWindPlaying {
+                        Slider(value: $audio.windVolume, in: 0...1)
+                            .accentColor(isDark ? Color(hex: 0x89C4E1) : Color(hex: 0x1D3B2E))
+                    }
+                }
+            }
+
+            // Lights pattern & color rows
             if state.showTopLights {
+                // Pattern row
                 HStack(spacing: 6) {
                     LightsShape()
                         .stroke(lineWidth: 1)
@@ -655,8 +816,8 @@ struct PopoverContentView: View {
                             let isSelected = state.lightsPattern == pat
                             Button(action: { state.lightsPattern = pat }) {
                                 Text(lightsPatternTitle(pat))
-                                    .font(monoFont(size: 8.5, weight: isSelected ? .bold : .regular))
-                                    .padding(.horizontal, 5)
+                                    .font(monoFont(size: 8, weight: isSelected ? .bold : .regular))
+                                    .padding(.horizontal, 4.5)
                                     .padding(.vertical, 2)
                                     .background(isSelected ? (isDark ? goldBrassColor.opacity(0.3) : Color(hex: 0xD4AF37)) : surfaceCardColor)
                                     .foregroundColor(isSelected ? (isDark ? Color(hex: 0xE2C15A) : Color(hex: 0x1D3B2E)) : secondaryTextColor)
@@ -664,6 +825,90 @@ struct PopoverContentView: View {
                             }
                             .buttonStyle(.plain)
                         }
+                    }
+                }
+
+                // Color palette row
+                HStack(spacing: 6) {
+                    Image(systemName: "paintpalette")
+                        .font(.system(size: 9.5))
+                        .foregroundColor(goldBrassColor)
+
+                    Text("COLOR")
+                        .font(monoFont(size: 8.5, weight: .bold))
+                        .foregroundColor(secondaryTextColor)
+
+                    Spacer()
+
+                    HStack(spacing: 3) {
+                        ForEach(LightsPalette.allCases) { pal in
+                            let isSelected = state.lightsPalette == pal
+                            Button(action: { state.lightsPalette = pal }) {
+                                VStack(spacing: 1.5) {
+                                    HStack(spacing: 2) {
+                                        ForEach(0..<3, id: \.self) { idx in
+                                            Circle()
+                                                .fill(palettePreviewColors(pal)[idx])
+                                                .frame(width: 4.5, height: 4.5)
+                                        }
+                                    }
+                                    Text(pal.shortName(in: state.language))
+                                        .font(monoFont(size: 7, weight: isSelected ? .bold : .regular))
+                                        .foregroundColor(isSelected ? (isDark ? Color(hex: 0xE2C15A) : Color(hex: 0x1D3B2E)) : secondaryTextColor)
+                                }
+                                .padding(.horizontal, 3.5)
+                                .padding(.vertical, 2.5)
+                                .background(
+                                    isSelected
+                                        ? (isDark ? goldBrassColor.opacity(0.3) : Color(hex: 0xD4AF37))
+                                        : surfaceCardColor
+                                )
+                                .cornerRadius(3)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 3)
+                                        .stroke(isSelected ? goldBrassColor : Color.clear, lineWidth: 0.8)
+                                )
+                            }
+                            .buttonStyle(.plain)
+                            .help(pal.displayName(in: state.language))
+                        }
+                    }
+                }
+
+                // Lights style row (3D / Pixel Art)
+                HStack(spacing: 6) {
+                    Image(systemName: "square.grid.2x2")
+                        .font(.system(size: 9.5))
+                        .foregroundColor(goldBrassColor)
+
+                    Text(isEn ? "STYLE" : "ESTILO")
+                        .font(monoFont(size: 8.5, weight: .bold))
+                        .foregroundColor(secondaryTextColor)
+
+                    Spacer()
+
+                    HStack(spacing: 3) {
+                        Button(action: { state.lightsStyle = .colorful }) {
+                            Text("3D")
+                                .font(monoFont(size: 8.5, weight: state.lightsStyle == .colorful ? .bold : .regular))
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 2)
+                                .background(state.lightsStyle == .colorful ? (isDark ? goldBrassColor.opacity(0.3) : Color(hex: 0xD4AF37)) : surfaceCardColor)
+                                .foregroundColor(state.lightsStyle == .colorful ? (isDark ? Color(hex: 0xE2C15A) : Color(hex: 0x1D3B2E)) : secondaryTextColor)
+                                .cornerRadius(3)
+                        }
+                        .buttonStyle(.plain)
+
+                        Button(action: { state.lightsStyle = .pixelArt }) {
+                            Text("Pixel Art")
+                                .font(monoFont(size: 8.5, weight: state.lightsStyle == .pixelArt ? .bold : .regular))
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 2)
+                                .background(state.lightsStyle == .pixelArt ? (isDark ? goldBrassColor.opacity(0.3) : Color(hex: 0xD4AF37)) : surfaceCardColor)
+                                .foregroundColor(state.lightsStyle == .pixelArt ? (isDark ? Color(hex: 0xE2C15A) : Color(hex: 0x1D3B2E)) : secondaryTextColor)
+                                .cornerRadius(3)
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
             }
@@ -706,7 +951,159 @@ struct PopoverContentView: View {
         switch pat {
         case .twinkle: return isEn ? "Twinkle" : "Parpadeo"
         case .wave: return isEn ? "Wave" : "Ola"
-        case .warmSteady: return isEn ? "Warm" : "Cálida"
+        case .warmSteady: return isEn ? "Steady" : "Fija"
+        case .rhythm: return isEn ? "Rhythm" : "Ritmo"
+        }
+    }
+
+    private func palettePreviewColors(_ pal: LightsPalette) -> [Color] {
+        switch pal {
+        case .classic:
+            return [Color(hex: 0xFF3B30), Color(hex: 0xFFD60A), Color(hex: 0x30D158)]
+        case .warm:
+            return [Color(hex: 0xFFC752), Color(hex: 0xFFDB85), Color(hex: 0xFFF2CC)]
+        case .candyCane:
+            return [Color(hex: 0xF52433), Color(hex: 0xFAFAFF), Color(hex: 0xFF4D5C)]
+        case .nordicIce:
+            return [Color(hex: 0x339EFA), Color(hex: 0x7AE0FF), Color(hex: 0xEBFAFF)]
+        case .pineGold:
+            return [Color(hex: 0x24AD5C), Color(hex: 0xF2C73D), Color(hex: 0xFFEBB3)]
+        }
+    }
+
+    @ViewBuilder
+    private func snowStyleButton(title: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(monoFont(size: 8, weight: isSelected ? .bold : .regular))
+                .padding(.horizontal, 4.5)
+                .padding(.vertical, 2)
+                .background(isSelected ? (isDark ? Color(hex: 0x89C4E1).opacity(0.3) : Color(hex: 0x1D3B2E)) : surfaceCardColor)
+                .foregroundColor(isSelected ? (isDark ? Color(hex: 0x89C4E1) : Color(hex: 0xF6F0E4)) : secondaryTextColor)
+                .cornerRadius(3)
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Santa Sleigh Section
+    private var santaSleighSection: some View {
+        HStack(spacing: 6) {
+            // Left: Sleigh Icon + SANTA label
+            HStack(spacing: 4) {
+                SleighShape()
+                    .stroke(lineWidth: 1.2)
+                    .frame(width: 15, height: 11)
+                    .foregroundColor(goldBrassColor)
+
+                Text("SANTA")
+                    .font(monoFont(size: 8.5, weight: .bold))
+                    .foregroundColor(secondaryTextColor)
+            }
+
+            Spacer(minLength: 4)
+
+            // Center: Frequency segmented buttons
+            HStack(spacing: 3) {
+                ForEach(SantaFrequency.allCases) { freq in
+                    let isSelected = state.santaFrequency == freq
+                    Button(action: { state.santaFrequency = freq }) {
+                        Text(santaFreqTitle(freq))
+                            .font(monoFont(size: 8, weight: isSelected ? .bold : .regular))
+                            .padding(.horizontal, 4.5)
+                            .padding(.vertical, 2)
+                            .background(
+                                isSelected
+                                    ? (isDark ? goldBrassColor.opacity(0.3) : Color(hex: 0xD4AF37))
+                                    : surfaceCardColor
+                            )
+                            .foregroundColor(
+                                isSelected
+                                    ? (isDark ? Color(hex: 0xE2C15A) : Color(hex: 0x1D3B2E))
+                                    : secondaryTextColor
+                            )
+                            .cornerRadius(3)
+                    }
+                    .buttonStyle(.plain)
+                    .help(santaFreqHelp(freq))
+                }
+            }
+
+            Spacer(minLength: 4)
+
+            // Right: Sound toggle + Flight invocation button
+            HStack(spacing: 3) {
+                Button(action: {
+                    state.santaSoundEnabled.toggle()
+                }) {
+                    Image(systemName: state.santaSoundEnabled ? "bell.fill" : "bell.slash")
+                        .font(.system(size: 9.5))
+                        .foregroundColor(state.santaSoundEnabled ? goldBrassColor : secondaryTextColor.opacity(0.65))
+                        .frame(width: 20, height: 18)
+                        .background(surfaceCardColor)
+                        .cornerRadius(3)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 3)
+                                .stroke(surfaceCardBorder, lineWidth: 0.8)
+                        )
+                }
+                .buttonStyle(.plain)
+                .help(isEn ? "Sleigh bells sound" : "Sonido de cascabeles")
+
+                Button(action: {
+                    ScreenEffectsManager.shared.triggerSantaFlightNow()
+                }) {
+                    Text(isEn ? "Fly" : "Volar")
+                        .font(monoFont(size: 8.5, weight: .bold))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2.5)
+                        .background(
+                            isDark
+                                ? accentRedColor.opacity(0.35)
+                                : accentRedColor.opacity(0.18)
+                        )
+                        .foregroundColor(
+                            isDark
+                                ? Color(hex: 0xF4EFE6)
+                                : accentRedColor
+                        )
+                        .cornerRadius(3)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 3)
+                                .stroke(accentRedColor.opacity(isDark ? 0.6 : 0.4), lineWidth: 0.8)
+                        )
+                }
+                .buttonStyle(.plain)
+                .help(isEn ? "Invoke Santa's flight now" : "Invocar vuelo de Santa ahora")
+            }
+        }
+        .padding(8)
+        .background(surfaceCardColor)
+        .cornerRadius(6)
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .stroke(surfaceCardBorder, lineWidth: 1)
+        )
+    }
+
+    private func santaFreqTitle(_ freq: SantaFrequency) -> String {
+        switch freq {
+        case .off:
+            return isEn ? "Off" : "No"
+        case .occasional:
+            return isEn ? "Occ." : "Ocas."
+        case .frequent:
+            return isEn ? "Often" : "Frec."
+        }
+    }
+
+    private func santaFreqHelp(_ freq: SantaFrequency) -> String {
+        switch freq {
+        case .off:
+            return isEn ? "Santa flights disabled" : "Vuelos de Santa desactivados"
+        case .occasional:
+            return isEn ? "Occasional flights" : "Vuelos ocasionales"
+        case .frequent:
+            return isEn ? "Frequent flights" : "Vuelos frecuentes"
         }
     }
 
@@ -729,6 +1126,15 @@ struct PopoverContentView: View {
             Toggle(
                 isEn ? "Show countdown in menu bar" : "Mostrar días en barra superior",
                 isOn: $state.showCountdownInMenuBar
+            )
+            .font(monoFont(size: 10))
+            .foregroundColor(primaryTextColor)
+            .toggleStyle(.checkbox)
+
+            // Launch at login toggle
+            Toggle(
+                isEn ? "Launch Noël at login" : "Iniciar Noël al encender la Mac",
+                isOn: $state.launchAtLogin
             )
             .font(monoFont(size: 10))
             .foregroundColor(primaryTextColor)
@@ -1069,7 +1475,7 @@ struct PopoverContentView: View {
     // MARK: - Footer
     private var footerView: some View {
         HStack {
-            Text(isEn ? "R-CLICK: PLAY/PAUSE" : "CLIC DER: PLAY/PAUSE")
+            Text(isEn ? "R-CLICK: PLAY · OPT+CLICK: HIDE" : "CLIC DER: PLAY · OPT+CLIC: OCULTAR")
                 .font(monoFont(size: 9))
                 .foregroundColor(secondaryTextColor)
 
@@ -1300,6 +1706,52 @@ struct FlameShape: Shape {
             control2: CGPoint(x: mx - w * 0.35, y: rect.minY + h * 0.25)
         )
         p.closeSubpath()
+        return p
+    }
+}
+
+struct SleighShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        var p = Path()
+        let w = rect.width
+        let h = rect.height
+
+        // 1. Runner (patín inferior con rizo frontal)
+        p.move(to: CGPoint(x: rect.minX + w * 0.05, y: rect.maxY - h * 0.12))
+        p.addLine(to: CGPoint(x: rect.minX + w * 0.78, y: rect.maxY - h * 0.12))
+        p.addQuadCurve(
+            to: CGPoint(x: rect.minX + w * 0.96, y: rect.minY + h * 0.62),
+            control: CGPoint(x: rect.minX + w * 0.94, y: rect.maxY - h * 0.12)
+        )
+        p.addQuadCurve(
+            to: CGPoint(x: rect.minX + w * 0.88, y: rect.minY + h * 0.68),
+            control: CGPoint(x: rect.minX + w * 0.96, y: rect.minY + h * 0.72)
+        )
+
+        // 2. Struts (montantes de apoyo)
+        p.move(to: CGPoint(x: rect.minX + w * 0.28, y: rect.maxY - h * 0.12))
+        p.addLine(to: CGPoint(x: rect.minX + w * 0.28, y: rect.minY + h * 0.68))
+
+        p.move(to: CGPoint(x: rect.minX + w * 0.65, y: rect.maxY - h * 0.12))
+        p.addLine(to: CGPoint(x: rect.minX + w * 0.65, y: rect.minY + h * 0.68))
+
+        // 3. Body / Carriage (cuerpo del trineo con respaldo alto y frente curvo)
+        p.move(to: CGPoint(x: rect.minX + w * 0.08, y: rect.minY + h * 0.20))
+        p.addCurve(
+            to: CGPoint(x: rect.minX + w * 0.32, y: rect.minY + h * 0.68),
+            control1: CGPoint(x: rect.minX + w * 0.08, y: rect.minY + h * 0.52),
+            control2: CGPoint(x: rect.minX + w * 0.18, y: rect.minY + h * 0.68)
+        )
+        p.addLine(to: CGPoint(x: rect.minX + w * 0.70, y: rect.minY + h * 0.68))
+        p.addQuadCurve(
+            to: CGPoint(x: rect.minX + w * 0.85, y: rect.minY + h * 0.32),
+            control: CGPoint(x: rect.minX + w * 0.82, y: rect.minY + h * 0.62)
+        )
+        p.addQuadCurve(
+            to: CGPoint(x: rect.minX + w * 0.70, y: rect.minY + h * 0.40),
+            control: CGPoint(x: rect.minX + w * 0.82, y: rect.minY + h * 0.32)
+        )
+
         return p
     }
 }

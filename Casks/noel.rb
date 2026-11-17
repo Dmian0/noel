@@ -1,6 +1,6 @@
 cask "noel" do
-  version "1.0.1"
-  sha256 "7c2fc5c45f6fb85c8f70595519b06a952a29fec264aec7462c4bcfd20680e513"
+  version "1.1.0"
+  sha256 "15e3293ce75f23def73a0c2a98a90493938d5f98f24bb56f42d1b34aaf67b431"
 
   url "https://github.com/Dmian0/noel/releases/download/v#{version}/Noel.zip"
   name "Noël"
