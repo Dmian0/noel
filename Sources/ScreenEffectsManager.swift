@@ -289,6 +289,41 @@ final class ScreenEffectsManager {
         }
         return false
     }
+
+    func handleSantaCrashLanding(onWindow santaWindow: NSWindow?, atLocalX localX: CGFloat) {
+        for (_, entry) in snowEntries {
+            if santaWindow == nil || abs(entry.window.frame.origin.x - (santaWindow?.frame.origin.x ?? 0)) < 10 {
+                entry.view.receiveSantaCrash(atLocalX: localX)
+            }
+        }
+    }
+
+    func handleGiftLandedOnSnow(onWindow santaWindow: NSWindow?, atLocalX localX: CGFloat, style: IconStyle) {
+        for (_, entry) in snowEntries {
+            if santaWindow == nil || abs(entry.window.frame.origin.x - (santaWindow?.frame.origin.x ?? 0)) < 10 {
+                entry.view.addLandedGift(atLocalX: localX, style: style)
+            }
+        }
+    }
+
+    func groundedSantaX(onWindow snowWindow: NSWindow?) -> CGFloat? {
+        for (_, entry) in santaEntries {
+            if snowWindow == nil || abs(entry.window.frame.origin.x - (snowWindow?.frame.origin.x ?? 0)) < 10 {
+                if let x = entry.view.groundedSantaLocalX {
+                    return x
+                }
+            }
+        }
+        return nil
+    }
+
+    func assistGroundedSanta(onWindow snowWindow: NSWindow?, amount: Double) {
+        for (_, entry) in santaEntries {
+            if snowWindow == nil || abs(entry.window.frame.origin.x - (snowWindow?.frame.origin.x ?? 0)) < 10 {
+                entry.view.assistSantaRecovery(amount: amount)
+            }
+        }
+    }
 }
 
 
@@ -304,8 +339,6 @@ private final class LightsOverlayView: NSView {
     private var bulbAngles: [CGFloat] = []
     private var bulbVelocities: [CGFloat] = []
     private var bulbFlashes: [CGFloat] = []
-    private var icicleLengths: [CGFloat] = []
-    private var iceShards: [IceShard] = []
     private var audioBass: Double = 0.25
     private var audioTreble: Double = 0.25
     private var audioActive: Bool = false
@@ -313,7 +346,6 @@ private final class LightsOverlayView: NSView {
     private var lastWireWidth: CGFloat = -1
 
     private let wireLayer = CAShapeLayer()
-    private let frostWireLayer = CAShapeLayer()
 
     private static let noAnimActions: [String: CAAction] = [
         "position": NSNull(),
@@ -326,66 +358,13 @@ private final class LightsOverlayView: NSView {
         "path": NSNull()
     ]
 
-    private static func createIcicleImage() -> CGImage? {
-        let w = 8
-        let h = 32
-        let colorSpace = CGColorSpaceCreateDeviceRGB()
-        guard let ctx = CGContext(
-            data: nil,
-            width: w,
-            height: h,
-            bitsPerComponent: 8,
-            bytesPerRow: w * 4,
-            space: colorSpace,
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ) else { return nil }
+    private static var glowImageCache: [String: CGImage] = [:]
 
-        let midX = CGFloat(w) * 0.5
-        ctx.beginPath()
-        ctx.move(to: CGPoint(x: midX - 2.6, y: CGFloat(h)))
-        ctx.addLine(to: CGPoint(x: midX, y: 0))
-        ctx.addLine(to: CGPoint(x: midX + 2.6, y: CGFloat(h)))
-        ctx.closePath()
-        ctx.setFillColor(red: 0.86, green: 0.94, blue: 1.0, alpha: 0.85)
-        ctx.fillPath()
-
-        ctx.setStrokeColor(red: 1.0, green: 1.0, blue: 1.0, alpha: 0.90)
-        ctx.setLineWidth(0.8)
-        ctx.strokeLineSegments(between: [CGPoint(x: midX, y: CGFloat(h)), CGPoint(x: midX, y: 2.0)])
-        return ctx.makeImage()
-    }
-
-    private static func createPixelIcicleImage() -> CGImage? {
-        let w = 8
-        let h = 32
-        let colorSpace = CGColorSpaceCreateDeviceRGB()
-        guard let ctx = CGContext(
-            data: nil,
-            width: w,
-            height: h,
-            bitsPerComponent: 8,
-            bytesPerRow: w * 4,
-            space: colorSpace,
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ) else { return nil }
-
-        ctx.setShouldAntialias(false)
-        ctx.setFillColor(red: 0.86, green: 0.94, blue: 1.0, alpha: 0.90)
-
-        ctx.fill(CGRect(x: 1, y: 26, width: 6, height: 6))
-        ctx.fill(CGRect(x: 2, y: 16, width: 4, height: 10))
-        ctx.fill(CGRect(x: 2, y: 8, width: 4, height: 8))
-        ctx.fill(CGRect(x: 3, y: 0, width: 2, height: 8))
-
-        ctx.setFillColor(red: 1.0, green: 1.0, blue: 1.0, alpha: 0.92)
-        ctx.fill(CGRect(x: 2, y: 12, width: 1, height: 16))
-        ctx.fill(CGRect(x: 3, y: 2, width: 1, height: 10))
-
-        return ctx.makeImage()
-    }
-
-    private static func createIceShardImage() -> CGImage? {
-        let size = 10
+    private static func glowImage(for color: NSColor, pixelArt: Bool, key: String) -> CGImage? {
+        if let cached = glowImageCache[key] {
+            return cached
+        }
+        let size = 44
         let colorSpace = CGColorSpaceCreateDeviceRGB()
         guard let ctx = CGContext(
             data: nil,
@@ -396,68 +375,86 @@ private final class LightsOverlayView: NSView {
             space: colorSpace,
             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
         ) else { return nil }
+
+        let rgb = color.usingColorSpace(.deviceRGB) ?? color
+        var r: CGFloat = 1, g: CGFloat = 1, b: CGFloat = 1, a: CGFloat = 1
+        rgb.getRed(&r, green: &g, blue: &b, alpha: &a)
 
         let mid = CGFloat(size) * 0.5
-        ctx.beginPath()
-        ctx.move(to: CGPoint(x: mid, y: CGFloat(size)))
-        ctx.addLine(to: CGPoint(x: CGFloat(size) * 0.8, y: mid))
-        ctx.addLine(to: CGPoint(x: mid, y: 0))
-        ctx.addLine(to: CGPoint(x: CGFloat(size) * 0.2, y: mid))
-        ctx.closePath()
-        ctx.setFillColor(red: 0.88, green: 0.96, blue: 1.0, alpha: 0.90)
-        ctx.fillPath()
-        return ctx.makeImage()
+        if pixelArt {
+            ctx.setShouldAntialias(false)
+            let rings: [(CGFloat, CGFloat)] = [
+                (18.0, 0.10),
+                (13.0, 0.22),
+                (9.0, 0.42),
+                (5.0, 0.78)
+            ]
+            for (rad, alpha) in rings {
+                ctx.setFillColor(red: r, green: g, blue: b, alpha: alpha)
+                let step: CGFloat = 2.0
+                var py: CGFloat = mid - rad
+                while py < mid + rad {
+                    var px: CGFloat = mid - rad
+                    while px < mid + rad {
+                        let dx = (px + 1.0) - mid
+                        let dy = (py + 1.0) - mid
+                        if hypot(dx, dy) <= rad {
+                            ctx.fill(CGRect(x: px, y: py, width: step, height: step))
+                        }
+                        px += step
+                    }
+                    py += step
+                }
+            }
+        } else {
+            let colors = [
+                CGColor(colorSpace: colorSpace, components: [r, g, b, 0.92])!,
+                CGColor(colorSpace: colorSpace, components: [r, g, b, 0.46])!,
+                CGColor(colorSpace: colorSpace, components: [r, g, b, 0.14])!,
+                CGColor(colorSpace: colorSpace, components: [r, g, b, 0.0])!
+            ] as CFArray
+            let locations: [CGFloat] = [0.0, 0.32, 0.68, 1.0]
+            if let gradient = CGGradient(colorsSpace: colorSpace, colors: colors, locations: locations) {
+                let center = CGPoint(x: mid, y: mid)
+                ctx.drawRadialGradient(
+                    gradient,
+                    startCenter: center,
+                    startRadius: 0,
+                    endCenter: center,
+                    endRadius: mid,
+                    options: []
+                )
+            }
+        }
+
+        if let img = ctx.makeImage() {
+            glowImageCache[key] = img
+            return img
+        }
+        return nil
     }
-
-    private static func createPixelIceShardImage() -> CGImage? {
-        let size = 10
-        let colorSpace = CGColorSpaceCreateDeviceRGB()
-        guard let ctx = CGContext(
-            data: nil,
-            width: size,
-            height: size,
-            bitsPerComponent: 8,
-            bytesPerRow: size * 4,
-            space: colorSpace,
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ) else { return nil }
-
-        ctx.setShouldAntialias(false)
-        ctx.setFillColor(red: 0.86, green: 0.94, blue: 1.0, alpha: 0.92)
-        ctx.fill(CGRect(x: 3, y: 1, width: 4, height: 8))
-        ctx.fill(CGRect(x: 1, y: 3, width: 8, height: 4))
-        ctx.setFillColor(red: 1.0, green: 1.0, blue: 1.0, alpha: 0.95)
-        ctx.fill(CGRect(x: 4, y: 4, width: 2, height: 2))
-
-        return ctx.makeImage()
-    }
-
-    private static let icicleImage: CGImage? = createIcicleImage()
-    private static let pixelIcicleImage: CGImage? = createPixelIcicleImage()
-    private static let iceShardImage: CGImage? = createIceShardImage()
-    private static let pixelIceShardImage: CGImage? = createPixelIceShardImage()
 
     private final class BulbLayers {
-        let socketLayer = CALayer()
+        let glowLayer = CALayer()
         let dropWireLayer = CALayer()
-        let outerGlowLayer = CALayer()
-        let innerGlowLayer = CALayer()
+        let socketLayer = CALayer()
         let bulbLayer = CALayer()
         let filamentLayer = CALayer()
-        let icicleLayer = CALayer()
+        let specularLayer = CALayer()
 
         init(root: CALayer, actions: [String: CAAction]) {
-            socketLayer.actions = actions
+            glowLayer.actions = actions
             dropWireLayer.actions = actions
-            outerGlowLayer.actions = actions
-            innerGlowLayer.actions = actions
+            socketLayer.actions = actions
             bulbLayer.actions = actions
             filamentLayer.actions = actions
-            icicleLayer.actions = actions
+            specularLayer.actions = actions
 
             socketLayer.bounds = CGRect(x: 0, y: 0, width: 4.0, height: 4.0)
             socketLayer.cornerRadius = 0.8
-            socketLayer.backgroundColor = NSColor(calibratedRed: 0.12, green: 0.22, blue: 0.14, alpha: 0.95).cgColor
+            socketLayer.backgroundColor = NSColor(calibratedRed: 0.11, green: 0.22, blue: 0.13, alpha: 0.95).cgColor
+            socketLayer.borderWidth = 0.6
+            socketLayer.borderColor = NSColor(calibratedRed: 0.72, green: 0.58, blue: 0.24, alpha: 0.75).cgColor
 
             dropWireLayer.bounds = CGRect(x: 0, y: 0, width: 1.0, height: 8.2)
             dropWireLayer.anchorPoint = CGPoint(x: 0.5, y: 1.0)
@@ -470,40 +467,30 @@ private final class LightsOverlayView: NSView {
             filamentLayer.cornerRadius = 1.3
             filamentLayer.backgroundColor = NSColor.white.cgColor
 
-            icicleLayer.contents = LightsOverlayView.icicleImage
-            icicleLayer.anchorPoint = CGPoint(x: 0.5, y: 1.0)
+            specularLayer.bounds = CGRect(x: 0, y: 0, width: 1.8, height: 2.4)
+            specularLayer.cornerRadius = 0.9
+            specularLayer.backgroundColor = NSColor.white.cgColor
+            specularLayer.opacity = 0.65
 
-            root.addSublayer(outerGlowLayer)
-            root.addSublayer(innerGlowLayer)
-            root.addSublayer(socketLayer)
+            root.addSublayer(glowLayer)
             root.addSublayer(dropWireLayer)
+            root.addSublayer(socketLayer)
             root.addSublayer(bulbLayer)
             root.addSublayer(filamentLayer)
-            root.addSublayer(icicleLayer)
+            root.addSublayer(specularLayer)
         }
 
         func setHidden(_ hidden: Bool) {
-            socketLayer.isHidden = hidden
+            glowLayer.isHidden = hidden
             dropWireLayer.isHidden = hidden
-            outerGlowLayer.isHidden = hidden
-            innerGlowLayer.isHidden = hidden
+            socketLayer.isHidden = hidden
             bulbLayer.isHidden = hidden
             filamentLayer.isHidden = hidden
-            icicleLayer.isHidden = hidden
+            specularLayer.isHidden = hidden
         }
     }
 
     private var bulbLayerPool: [BulbLayers] = []
-    private var shardLayerPool: [CALayer] = []
-
-    private struct IceShard {
-        var x: CGFloat
-        var y: CGFloat
-        var vx: CGFloat
-        var vy: CGFloat
-        var size: CGFloat
-        var opacity: CGFloat
-    }
 
     override var isOpaque: Bool { false }
 
@@ -530,13 +517,6 @@ private final class LightsOverlayView: NSView {
             wireLayer.strokeColor = NSColor(calibratedRed: 0.08, green: 0.24, blue: 0.12, alpha: 0.88).cgColor
             wireLayer.lineWidth = 1.6
             root.addSublayer(wireLayer)
-
-            frostWireLayer.actions = Self.noAnimActions
-            frostWireLayer.fillColor = nil
-            frostWireLayer.strokeColor = NSColor(calibratedRed: 0.90, green: 0.96, blue: 1.0, alpha: 0.75).cgColor
-            frostWireLayer.lineWidth = 0.9
-            frostWireLayer.isHidden = true
-            root.addSublayer(frostWireLayer)
         }
     }
 
@@ -555,8 +535,6 @@ private final class LightsOverlayView: NSView {
         bulbAngles.removeAll()
         bulbVelocities.removeAll()
         bulbFlashes.removeAll()
-        icicleLengths.removeAll()
-        iceShards.removeAll()
         lastMouseX = nil
         lastWireWidth = -1
         lastWireStyle = .colorful
@@ -564,10 +542,7 @@ private final class LightsOverlayView: NSView {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         wireLayer.path = nil
-        frostWireLayer.path = nil
-        frostWireLayer.isHidden = true
         for b in bulbLayerPool { b.setHidden(true) }
-        for s in shardLayerPool { s.isHidden = true }
         CATransaction.commit()
 
         malloc_zone_pressure_relief(nil, 0)
@@ -584,21 +559,6 @@ private final class LightsOverlayView: NSView {
                 bulbVelocities[i] += dir * strength + CGFloat.random(in: (-0.12)...0.12)
                 if i < bulbFlashes.count {
                     bulbFlashes[i] = min(1.0, max(bulbFlashes[i], (1.0 - dist / 95.0) * 1.15))
-                }
-                if i < icicleLengths.count && icicleLengths[i] > 3.0 && dist < 85.0 {
-                    icicleLengths[i] = 0
-                    let icicleX = CGFloat(i) * 42.0 + 5.0
-                    let icicleY = bounds.height - 9.0
-                    for _ in 0..<5 {
-                        iceShards.append(IceShard(
-                            x: icicleX + CGFloat.random(in: (-3.0)...3.0),
-                            y: icicleY + CGFloat.random(in: (-2.0)...1.0),
-                            vx: CGFloat.random(in: (-2.5)...2.5),
-                            vy: CGFloat.random(in: (-3.5)...(-0.8)),
-                            size: CGFloat.random(in: 2.0...4.0),
-                            opacity: CGFloat.random(in: 0.7...0.95)
-                        ))
-                    }
                 }
             }
         }
@@ -655,9 +615,6 @@ private final class LightsOverlayView: NSView {
         if bulbFlashes.count != count {
             bulbFlashes = Array(repeating: 0, count: count)
         }
-        if icicleLengths.count != count {
-            icicleLengths = Array(repeating: 0, count: count)
-        }
 
         let mousePt = window?.convertPoint(fromScreen: NSEvent.mouseLocation)
         if let mp = mousePt {
@@ -683,36 +640,6 @@ private final class LightsOverlayView: NSView {
             bulbFlashes[i] *= 0.88
         }
 
-        // Crecimiento y derretimiento de carambanos
-        if AppState.shared.isSnowing {
-            let maxLen: CGFloat = (AppState.shared.snowIntensity >= 0.85) ? 15.0 : 9.5
-            for i in 0..<count {
-                let targetRatio = 0.45 + 0.55 * abs(sin(Double(i) * 1.7 + 0.5))
-                let targetLen = maxLen * CGFloat(targetRatio)
-                if icicleLengths[i] < targetLen {
-                    icicleLengths[i] = min(targetLen, icicleLengths[i] + 0.06)
-                }
-            }
-        } else {
-            for i in 0..<count {
-                icicleLengths[i] = max(0, icicleLengths[i] - 0.12)
-            }
-        }
-
-        // Actualizar posicion y opacidad de iceShards
-        var nextShards: [IceShard] = []
-        for var shard in iceShards {
-            shard.x += shard.vx
-            shard.y += shard.vy
-            shard.vy -= 0.45
-            shard.opacity -= 0.035
-            if shard.y >= -6.0 && shard.opacity > 0.02 {
-                nextShards.append(shard)
-            }
-        }
-        iceShards = nextShards
-
-        // Modo Ritmo (Audio-Reactivo)
         if pattern == .rhythm {
             let levels = AudioManager.shared.currentAudioLevels(at: time)
             audioBass = levels.bass
@@ -744,15 +671,12 @@ private final class LightsOverlayView: NSView {
             let festoonCount = Int(w / spacing) + 2
 
             let wirePath = CGMutablePath()
-            let frostPath = CGMutablePath()
 
             if lightsStyle == .pixelArt {
                 wirePath.move(to: CGPoint(x: 0, y: h - 2))
-                frostPath.move(to: CGPoint(x: 0, y: h - 1.5))
                 for i in 0..<festoonCount {
                     let xStart = CGFloat(i) * spacing
                     var currYWire = h - 2
-                    var currYFrost = h - 1.5
 
                     for stepIdx in 0..<14 {
                         let t = (Double(stepIdx) + 0.5) / 14.0
@@ -760,22 +684,15 @@ private final class LightsOverlayView: NSView {
                         let dipRounded = CGFloat(round(dip / 3.0) * 3.0)
                         let nextX = xStart + CGFloat(stepIdx + 1) * 3.0
                         let nextYWire = (h - 2) - dipRounded
-                        let nextYFrost = (h - 1.5) - dipRounded
 
                         wirePath.addLine(to: CGPoint(x: nextX, y: currYWire))
                         wirePath.addLine(to: CGPoint(x: nextX, y: nextYWire))
                         currYWire = nextYWire
-
-                        frostPath.addLine(to: CGPoint(x: nextX, y: currYFrost))
-                        frostPath.addLine(to: CGPoint(x: nextX, y: nextYFrost))
-                        currYFrost = nextYFrost
                     }
                     wirePath.addLine(to: CGPoint(x: xStart + spacing, y: h - 2))
-                    frostPath.addLine(to: CGPoint(x: xStart + spacing, y: h - 1.5))
                 }
             } else {
                 wirePath.move(to: CGPoint(x: 0, y: h - 2))
-                frostPath.move(to: CGPoint(x: 0, y: h - 1.5))
                 for i in 0..<festoonCount {
                     let xStart = CGFloat(i) * spacing
                     let xEnd = xStart + spacing
@@ -785,18 +702,10 @@ private final class LightsOverlayView: NSView {
                         control1: CGPoint(x: xMid - spacing * 0.2, y: h - 11),
                         control2: CGPoint(x: xMid + spacing * 0.2, y: h - 11)
                     )
-                    frostPath.addCurve(
-                        to: CGPoint(x: xEnd, y: h - 1.5),
-                        control1: CGPoint(x: xMid - spacing * 0.2, y: h - 10.5),
-                        control2: CGPoint(x: xMid + spacing * 0.2, y: h - 10.5)
-                    )
                 }
             }
             wireLayer.path = wirePath
-            frostWireLayer.path = frostPath
         }
-
-        frostWireLayer.isHidden = !AppState.shared.isSnowing
 
         let spacing: CGFloat = 42.0
         let activePalette = colors(for: palette)
@@ -849,19 +758,14 @@ private final class LightsOverlayView: NSView {
             bulb.dropWireLayer.position = CGPoint(x: x, y: socketTopY - 2.0)
             bulb.dropWireLayer.transform = CATransform3DMakeRotation(angle, 0, 0, 1)
 
-            let glowRadius = 11.5 * CGFloat(0.7 + 0.35 * totalBrightness)
-            let glowAlpha = min(0.95, 0.55 * totalBrightness)
-
-            bulb.outerGlowLayer.bounds = CGRect(x: 0, y: 0, width: glowRadius * 2, height: glowRadius * 2)
-            bulb.outerGlowLayer.position = CGPoint(x: bulbX, y: bulbCenterY)
-            bulb.outerGlowLayer.backgroundColor = baseColor.cgColor
-            bulb.outerGlowLayer.opacity = Float(glowAlpha * 0.22)
-
-            let innerRadius = glowRadius * 0.58
-            bulb.innerGlowLayer.bounds = CGRect(x: 0, y: 0, width: innerRadius * 2, height: innerRadius * 2)
-            bulb.innerGlowLayer.position = CGPoint(x: bulbX, y: bulbCenterY)
-            bulb.innerGlowLayer.backgroundColor = baseColor.cgColor
-            bulb.innerGlowLayer.opacity = Float(glowAlpha * 0.48)
+            let colorIndex = i % activePalette.count
+            let glowKey = "\(palette.rawValue)-\(colorIndex)-\(lightsStyle == .pixelArt ? "px" : "3d")"
+            bulb.glowLayer.contents = Self.glowImage(for: baseColor, pixelArt: lightsStyle == .pixelArt, key: glowKey)
+            bulb.glowLayer.magnificationFilter = (lightsStyle == .pixelArt) ? .nearest : .linear
+            let glowDiameter = 30.0 * CGFloat(0.75 + 0.32 * totalBrightness)
+            bulb.glowLayer.bounds = CGRect(x: 0, y: 0, width: glowDiameter, height: glowDiameter)
+            bulb.glowLayer.position = CGPoint(x: bulbX, y: bulbCenterY)
+            bulb.glowLayer.opacity = Float(min(0.98, 0.52 + 0.46 * totalBrightness))
 
             bulb.bulbLayer.position = CGPoint(x: bulbX, y: bulbCenterY)
             bulb.bulbLayer.backgroundColor = baseColor.cgColor
@@ -871,6 +775,9 @@ private final class LightsOverlayView: NSView {
             bulb.filamentLayer.position = CGPoint(x: bulbX, y: bulbCenterY)
             bulb.filamentLayer.opacity = filamentAlpha
 
+            bulb.specularLayer.position = CGPoint(x: bulbX - 1.3, y: bulbCenterY + 1.6)
+            bulb.specularLayer.opacity = Float(min(0.72, 0.35 + 0.30 * totalBrightness))
+
             if lightsStyle == .pixelArt {
                 bulb.socketLayer.cornerRadius = 0
                 bulb.dropWireLayer.bounds = CGRect(x: 0, y: 0, width: 2.0, height: 8.2)
@@ -878,10 +785,8 @@ private final class LightsOverlayView: NSView {
                 bulb.bulbLayer.cornerRadius = 1.0
                 bulb.filamentLayer.bounds = CGRect(x: 0, y: 0, width: 3.0, height: 3.0)
                 bulb.filamentLayer.cornerRadius = 0
-                bulb.outerGlowLayer.cornerRadius = 3.0
-                bulb.innerGlowLayer.cornerRadius = 2.0
-                bulb.icicleLayer.contents = Self.pixelIcicleImage
-                bulb.icicleLayer.magnificationFilter = .nearest
+                bulb.specularLayer.bounds = CGRect(x: 0, y: 0, width: 1.8, height: 2.0)
+                bulb.specularLayer.cornerRadius = 0
             } else {
                 bulb.socketLayer.cornerRadius = 0.8
                 bulb.dropWireLayer.bounds = CGRect(x: 0, y: 0, width: 1.0, height: 8.2)
@@ -889,50 +794,13 @@ private final class LightsOverlayView: NSView {
                 bulb.bulbLayer.cornerRadius = 3.1
                 bulb.filamentLayer.bounds = CGRect(x: 0, y: 0, width: 2.6, height: 3.6)
                 bulb.filamentLayer.cornerRadius = 1.3
-                bulb.outerGlowLayer.cornerRadius = glowRadius
-                bulb.innerGlowLayer.cornerRadius = innerRadius
-                bulb.icicleLayer.contents = Self.icicleImage
-                bulb.icicleLayer.magnificationFilter = .linear
-            }
-
-            if i < icicleLengths.count && icicleLengths[i] > 0.8 {
-                let len = icicleLengths[i]
-                let icicleX = CGFloat(i) * spacing + spacing * 0.12
-                let topY = h - 3.5
-                bulb.icicleLayer.isHidden = false
-                bulb.icicleLayer.bounds = CGRect(x: 0, y: 0, width: 6.0, height: len)
-                bulb.icicleLayer.position = CGPoint(x: icicleX, y: topY)
-                bulb.icicleLayer.opacity = 0.88
-            } else {
-                bulb.icicleLayer.isHidden = true
+                bulb.specularLayer.bounds = CGRect(x: 0, y: 0, width: 1.8, height: 2.4)
+                bulb.specularLayer.cornerRadius = 0.9
             }
         }
 
         for i in count..<bulbLayerPool.count {
             bulbLayerPool[i].setHidden(true)
-        }
-
-        while shardLayerPool.count < iceShards.count {
-            let l = CALayer()
-            l.actions = Self.noAnimActions
-            l.anchorPoint = CGPoint(x: 0.5, y: 0.5)
-            root.addSublayer(l)
-            shardLayerPool.append(l)
-        }
-
-        for i in 0..<iceShards.count {
-            let shard = iceShards[i]
-            let l = shardLayerPool[i]
-            l.isHidden = false
-            l.contents = (lightsStyle == .pixelArt) ? Self.pixelIceShardImage : Self.iceShardImage
-            l.magnificationFilter = (lightsStyle == .pixelArt) ? .nearest : .linear
-            l.bounds = CGRect(x: 0, y: 0, width: shard.size * 2.0, height: shard.size * 2.0)
-            l.position = CGPoint(x: shard.x, y: shard.y)
-            l.opacity = Float(shard.opacity)
-        }
-
-        for i in iceShards.count..<shardLayerPool.count {
-            shardLayerPool[i].isHidden = true
         }
 
         CATransaction.commit()

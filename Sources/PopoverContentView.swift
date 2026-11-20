@@ -761,6 +761,48 @@ struct PopoverContentView: View {
                         }
                     }
                 }
+
+                // Snow elves row (Off / 1 / Crew + 3D / PX)
+                HStack(spacing: 6) {
+                    Image(systemName: "figure.walk")
+                        .font(.system(size: 9.5))
+                        .foregroundColor(isDark ? Color(hex: 0x89C4E1) : Color(hex: 0x1D3B2E))
+
+                    Text(isEn ? "ELVES" : "DUENDES")
+                        .font(monoFont(size: 8.5, weight: .bold))
+                        .foregroundColor(secondaryTextColor)
+
+                    Spacer(minLength: 4)
+
+                    HStack(spacing: 6) {
+                        HStack(spacing: 3) {
+                            ForEach(SnowElvesMode.allCases) { mode in
+                                let isSelected = state.snowElvesMode == mode
+                                Button(action: { state.snowElvesMode = mode }) {
+                                    Text(mode.displayName(in: state.language))
+                                        .font(monoFont(size: 8, weight: isSelected ? .bold : .regular))
+                                        .padding(.horizontal, 4.5)
+                                        .padding(.vertical, 2)
+                                        .background(isSelected ? (isDark ? Color(hex: 0x89C4E1).opacity(0.3) : Color(hex: 0x1D3B2E)) : surfaceCardColor)
+                                        .foregroundColor(isSelected ? (isDark ? Color(hex: 0x89C4E1) : Color(hex: 0xF6F0E4)) : secondaryTextColor)
+                                        .cornerRadius(3)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+
+                        if state.snowElvesMode != .off {
+                            HStack(spacing: 3) {
+                                snowStyleButton(title: "3D", isSelected: state.snowElvesStyle == .colorful) {
+                                    state.snowElvesStyle = .colorful
+                                }
+                                snowStyleButton(title: "PX", isSelected: state.snowElvesStyle == .pixelArt) {
+                                    state.snowElvesStyle = .pixelArt
+                                }
+                            }
+                        }
+                    }
+                }
             }
 
             // Winter wind row

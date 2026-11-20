@@ -44,9 +44,55 @@ final class SnowOverlayView: NSView {
         var vx: CGFloat
         var vy: CGFloat
         var radius: CGFloat
+        var isFromElf: Bool = false
+        var age: Double = 0.0
     }
 
-    // MARK: - Static Tiny Cached Textures (< 18 KB total)
+    private struct LandedGift {
+        var x: CGFloat
+        var age: Double
+        var maxAge: Double
+        var style: IconStyle
+    }
+
+    private enum ElfPose: Int, CaseIterable {
+        case walk0 = 0
+        case walk1 = 1
+        case dig = 2
+        case plow = 3
+        case carryGift = 4
+        case knockedDown = 5
+        case throwBall = 6
+    }
+
+    private enum ElfBehaviorState {
+        case patrolling
+        case shoveling
+        case rescuingSanta
+        case fetchingGift
+        case buildingSnowman(targetX: CGFloat)
+        case knockedDown
+        case throwingCounterBall
+    }
+
+    private struct SnowElf {
+        var x: CGFloat
+        var facingRight: Bool
+        var behavior: ElfBehaviorState
+        var stateTimer: Double
+        var targetX: CGFloat
+        var animTime: Double
+        var carryingGift: Bool
+        var buildCooldown: Double
+    }
+
+    private struct Snowman {
+        var x: CGFloat
+        var stage: Int // 1 = base, 2 = base + torso, 3 = completo
+        var buildProgress: Double
+    }
+
+    // MARK: - Static Tiny Cached Textures (< 65 KB total)
 
     private static func makeContext(width: Int, height: Int) -> CGContext? {
         let colorSpace = CGColorSpaceCreateDeviceRGB()
@@ -139,7 +185,7 @@ final class SnowOverlayView: NSView {
         return ctx.makeImage()
     }()
 
-    // MARK: Retro / 8-Bit Pixel Art Textures (< 6 KB total)
+    // MARK: Retro / 8-Bit Pixel Art Textures
 
     private static let pixelNormalFlakeImage: CGImage? = {
         guard let ctx = makeContext(width: 16, height: 16) else { return nil }
@@ -156,7 +202,6 @@ final class SnowOverlayView: NSView {
     private static let pixelBokehFlakeImage: CGImage? = {
         guard let ctx = makeContext(width: 24, height: 24) else { return nil }
         ctx.setShouldAntialias(false)
-        // Translucent stepped halo
         ctx.setFillColor(NSColor.white.withAlphaComponent(0.45).cgColor)
         ctx.fill(CGRect(x: 9, y: 16, width: 6, height: 3))
         ctx.fill(CGRect(x: 9, y: 5, width: 6, height: 3))
@@ -166,7 +211,6 @@ final class SnowOverlayView: NSView {
         ctx.fill(CGRect(x: 16, y: 15, width: 2, height: 2))
         ctx.fill(CGRect(x: 6, y: 7, width: 2, height: 2))
         ctx.fill(CGRect(x: 16, y: 7, width: 2, height: 2))
-        // Solid pure white center
         ctx.setFillColor(NSColor.white.cgColor)
         ctx.fill(CGRect(x: 8, y: 8, width: 8, height: 8))
         return ctx.makeImage()
@@ -188,24 +232,331 @@ final class SnowOverlayView: NSView {
     private static let pixelSnowballImage: CGImage? = {
         guard let ctx = makeContext(width: 24, height: 24) else { return nil }
         ctx.setShouldAntialias(false)
-        // Octagonal white body
         ctx.setFillColor(NSColor.white.cgColor)
         ctx.fill(CGRect(x: 6, y: 18, width: 12, height: 3))
         ctx.fill(CGRect(x: 3, y: 6, width: 18, height: 12))
         ctx.fill(CGRect(x: 6, y: 3, width: 12, height: 3))
 
-        // Ice blue shadow along bottom and right
         let iceBlue = NSColor(calibratedRed: 0.76, green: 0.88, blue: 1.0, alpha: 0.95).cgColor
         ctx.setFillColor(iceBlue)
         ctx.fill(CGRect(x: 6, y: 3, width: 12, height: 3))
         ctx.fill(CGRect(x: 15, y: 6, width: 6, height: 3))
         ctx.fill(CGRect(x: 18, y: 9, width: 3, height: 6))
 
-        // Pure white specular highlight block at top-left
         ctx.setFillColor(NSColor.white.cgColor)
         ctx.fill(CGRect(x: 6, y: 15, width: 3, height: 3))
         return ctx.makeImage()
     }()
+
+    // MARK: Landed Gifts Textures
+
+    private static func createLandedGiftImage(pixelArt: Bool) -> CGImage? {
+        let size = 18
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        guard let ctx = CGContext(
+            data: nil,
+            width: size,
+            height: size,
+            bitsPerComponent: 8,
+            bytesPerRow: size * 4,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return nil }
+
+        if pixelArt {
+            ctx.setShouldAntialias(false)
+            ctx.setFillColor(red: 0.85, green: 0.18, blue: 0.20, alpha: 1.0)
+            ctx.fill(CGRect(x: 3, y: 1, width: 12, height: 12))
+
+            ctx.setFillColor(red: 0.95, green: 0.80, blue: 0.22, alpha: 1.0)
+            ctx.fill(CGRect(x: 8, y: 1, width: 2, height: 12))
+            ctx.fill(CGRect(x: 3, y: 6, width: 12, height: 2))
+
+            ctx.fill(CGRect(x: 5, y: 13, width: 3, height: 2))
+            ctx.fill(CGRect(x: 10, y: 13, width: 3, height: 2))
+            ctx.fill(CGRect(x: 7, y: 13, width: 4, height: 3))
+        } else {
+            ctx.setShouldAntialias(true)
+            ctx.setFillColor(red: 0.0, green: 0.0, blue: 0.0, alpha: 0.18)
+            ctx.fillEllipse(in: CGRect(x: 2, y: 0, width: 14, height: 3))
+
+            let box = CGRect(x: 3, y: 1, width: 12, height: 12)
+            ctx.setFillColor(red: 0.80, green: 0.16, blue: 0.18, alpha: 1.0)
+            ctx.addPath(CGPath(roundedRect: box, cornerWidth: 1.5, cornerHeight: 1.5, transform: nil))
+            ctx.fillPath()
+
+            ctx.setFillColor(red: 0.95, green: 0.80, blue: 0.24, alpha: 1.0)
+            ctx.fill(CGRect(x: 8, y: 1, width: 2, height: 12))
+            ctx.fill(CGRect(x: 3, y: 6, width: 12, height: 2))
+
+            ctx.fillEllipse(in: CGRect(x: 4.5, y: 12.5, width: 4.5, height: 3.5))
+            ctx.fillEllipse(in: CGRect(x: 9.0, y: 12.5, width: 4.5, height: 3.5))
+            ctx.setFillColor(red: 1.0, green: 0.88, blue: 0.35, alpha: 1.0)
+            ctx.fillEllipse(in: CGRect(x: 7.5, y: 12.0, width: 3.0, height: 3.0))
+        }
+        return ctx.makeImage()
+    }
+
+    private static let landedGift3DImage: CGImage? = createLandedGiftImage(pixelArt: false)
+    private static let landedGiftPixelImage: CGImage? = createLandedGiftImage(pixelArt: true)
+
+    // MARK: - Elf & Snowman Textures
+
+    private static func createElfImage(pose: ElfPose, pixelArt: Bool) -> CGImage? {
+        let w = 24
+        let h = 28
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        guard let ctx = CGContext(
+            data: nil,
+            width: w,
+            height: h,
+            bitsPerComponent: 8,
+            bytesPerRow: w * 4,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return nil }
+
+        ctx.setShouldAntialias(!pixelArt)
+
+        let isDown = (pose == .knockedDown)
+
+        let bootColor = NSColor(calibratedRed: 0.18, green: 0.14, blue: 0.12, alpha: 1.0).cgColor
+        let legColor = NSColor(calibratedRed: 0.85, green: 0.18, blue: 0.20, alpha: 1.0).cgColor
+        let tunicColor = NSColor(calibratedRed: 0.14, green: 0.62, blue: 0.28, alpha: 1.0).cgColor
+        let beltColor = NSColor(calibratedRed: 0.12, green: 0.12, blue: 0.12, alpha: 1.0).cgColor
+        let buckleColor = NSColor(calibratedRed: 0.95, green: 0.80, blue: 0.22, alpha: 1.0).cgColor
+        let skinColor = NSColor(calibratedRed: 0.98, green: 0.80, blue: 0.72, alpha: 1.0).cgColor
+        let hatColor = NSColor(calibratedRed: 0.85, green: 0.18, blue: 0.20, alpha: 1.0).cgColor
+        let whiteColor = NSColor.white.cgColor
+        let shovelWood = NSColor(calibratedRed: 0.55, green: 0.35, blue: 0.18, alpha: 1.0).cgColor
+        let shovelBlade = NSColor(calibratedRed: 0.82, green: 0.86, blue: 0.90, alpha: 1.0).cgColor
+
+        if isDown {
+            ctx.setFillColor(bootColor)
+            ctx.fill(CGRect(x: 13, y: 2, width: 6, height: 4))
+            ctx.setFillColor(legColor)
+            ctx.fill(CGRect(x: 10, y: 2, width: 4, height: 4))
+
+            ctx.setFillColor(tunicColor)
+            ctx.fill(CGRect(x: 4, y: 3, width: 8, height: 8))
+
+            ctx.setFillColor(beltColor)
+            ctx.fill(CGRect(x: 4, y: 5, width: 8, height: 2))
+            ctx.setFillColor(buckleColor)
+            ctx.fill(CGRect(x: 7, y: 5, width: 2, height: 2))
+
+            ctx.setFillColor(skinColor)
+            ctx.fill(CGRect(x: 5, y: 11, width: 7, height: 6))
+            ctx.setFillColor(bootColor)
+            ctx.fill(CGRect(x: 8, y: 13, width: 1.5, height: 1.5))
+
+            ctx.setFillColor(hatColor)
+            ctx.fill(CGRect(x: 4, y: 16, width: 7, height: 4))
+            ctx.fill(CGRect(x: 2, y: 18, width: 4, height: 3))
+            ctx.setFillColor(whiteColor)
+            ctx.fill(CGRect(x: 1, y: 19, width: 2.5, height: 2.5))
+
+            ctx.setFillColor(buckleColor)
+            ctx.fill(CGRect(x: 4, y: 23, width: 2.5, height: 2.5))
+            ctx.fill(CGRect(x: 10, y: 24, width: 2.5, height: 2.5))
+        } else {
+            let isWalk1 = (pose == .walk1)
+            let isDig = (pose == .dig)
+            let isPlow = (pose == .plow)
+            let isCarry = (pose == .carryGift)
+            let isThrow = (pose == .throwBall)
+
+            let bodyOffX: CGFloat = isDig ? 2.0 : 0.0
+            let bodyOffY: CGFloat = isDig ? -1.5 : 0.0
+
+            ctx.setFillColor(bootColor)
+            if isWalk1 {
+                ctx.fill(CGRect(x: 8 + bodyOffX, y: 1, width: 3.5, height: 3))
+                ctx.fill(CGRect(x: 12 + bodyOffX, y: 2, width: 3.5, height: 3))
+            } else {
+                ctx.fill(CGRect(x: 7 + bodyOffX, y: 2, width: 3.5, height: 3))
+                ctx.fill(CGRect(x: 13 + bodyOffX, y: 1, width: 3.5, height: 3))
+            }
+
+            ctx.setFillColor(legColor)
+            ctx.fill(CGRect(x: 8 + bodyOffX, y: 4, width: 2.5, height: 4))
+            ctx.fill(CGRect(x: 12 + bodyOffX, y: 4, width: 2.5, height: 4))
+
+            ctx.setFillColor(tunicColor)
+            ctx.fill(CGRect(x: 6 + bodyOffX, y: 8 + bodyOffY, width: 10, height: 8))
+
+            ctx.setFillColor(beltColor)
+            ctx.fill(CGRect(x: 6 + bodyOffX, y: 9 + bodyOffY, width: 10, height: 2))
+            ctx.setFillColor(buckleColor)
+            ctx.fill(CGRect(x: 10 + bodyOffX, y: 9 + bodyOffY, width: 2.5, height: 2))
+
+            ctx.setFillColor(hatColor)
+            ctx.fill(CGRect(x: 7 + bodyOffX, y: 15 + bodyOffY, width: 8, height: 2))
+
+            ctx.setFillColor(skinColor)
+            ctx.fill(CGRect(x: 7 + bodyOffX, y: 16 + bodyOffY, width: 8, height: 6))
+            ctx.setFillColor(bootColor)
+            ctx.fill(CGRect(x: 12 + bodyOffX, y: 18 + bodyOffY, width: 1.5, height: 1.5))
+
+            ctx.setFillColor(hatColor)
+            ctx.fill(CGRect(x: 6 + bodyOffX, y: 21 + bodyOffY, width: 9, height: 4))
+            ctx.fill(CGRect(x: 4 + bodyOffX, y: 24 + bodyOffY, width: 6, height: 3))
+            ctx.setFillColor(whiteColor)
+            ctx.fill(CGRect(x: 2 + bodyOffX, y: 25 + bodyOffY, width: 3, height: 3))
+
+            if isDig {
+                ctx.setFillColor(shovelWood)
+                ctx.fill(CGRect(x: 13, y: 6, width: 2, height: 9))
+                ctx.setFillColor(shovelBlade)
+                ctx.fill(CGRect(x: 14, y: 1, width: 6, height: 6))
+            } else if isPlow {
+                ctx.setFillColor(hatColor)
+                ctx.fill(CGRect(x: 16, y: 1, width: 7, height: 11))
+                ctx.setFillColor(buckleColor)
+                ctx.fill(CGRect(x: 22, y: 1, width: 2, height: 11))
+                ctx.setFillColor(shovelWood)
+                ctx.fill(CGRect(x: 13, y: 8, width: 4, height: 2))
+            } else if isCarry {
+                let giftBox = CGRect(x: 14, y: 9, width: 8, height: 8)
+                ctx.setFillColor(hatColor)
+                ctx.fill(giftBox)
+                ctx.setFillColor(buckleColor)
+                ctx.fill(CGRect(x: 17, y: 9, width: 2, height: 8))
+                ctx.fill(CGRect(x: 14, y: 12, width: 8, height: 2))
+            } else if isThrow {
+                ctx.setFillColor(skinColor)
+                ctx.fill(CGRect(x: 12, y: 14, width: 4, height: 5))
+                ctx.setFillColor(whiteColor)
+                ctx.fill(CGRect(x: 15, y: 18, width: 5.5, height: 5.5))
+            } else {
+                ctx.setFillColor(shovelWood)
+                ctx.fill(CGRect(x: 14, y: 6, width: 2, height: 10))
+                ctx.setFillColor(shovelBlade)
+                ctx.fill(CGRect(x: 15, y: 4, width: 5, height: 5))
+            }
+        }
+
+        return ctx.makeImage()
+    }
+
+    private static func createSnowmanImage(stage: Int, pixelArt: Bool) -> CGImage? {
+        let w = 26
+        let h = 34
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        guard let ctx = CGContext(
+            data: nil,
+            width: w,
+            height: h,
+            bitsPerComponent: 8,
+            bytesPerRow: w * 4,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return nil }
+
+        ctx.setShouldAntialias(!pixelArt)
+
+        let whiteColor = NSColor.white.cgColor
+        let shadowColor = NSColor(calibratedRed: 0.82, green: 0.90, blue: 0.98, alpha: 0.95).cgColor
+        let coalColor = NSColor(calibratedRed: 0.15, green: 0.15, blue: 0.15, alpha: 1.0).cgColor
+        let carrotColor = NSColor(calibratedRed: 1.0, green: 0.48, blue: 0.10, alpha: 1.0).cgColor
+        let scarfColor = NSColor(calibratedRed: 0.88, green: 0.16, blue: 0.18, alpha: 1.0).cgColor
+        let twigColor = NSColor(calibratedRed: 0.48, green: 0.30, blue: 0.16, alpha: 1.0).cgColor
+
+        ctx.setFillColor(shadowColor)
+        ctx.fillEllipse(in: CGRect(x: 4, y: 2, width: 18, height: 16))
+        ctx.setFillColor(whiteColor)
+        ctx.fillEllipse(in: CGRect(x: 4.5, y: 3.5, width: 17, height: 14.5))
+
+        if stage >= 2 {
+            ctx.setFillColor(shadowColor)
+            ctx.fillEllipse(in: CGRect(x: 6, y: 13, width: 14, height: 13))
+            ctx.setFillColor(whiteColor)
+            ctx.fillEllipse(in: CGRect(x: 6.5, y: 14.2, width: 13, height: 11.8))
+
+            ctx.setFillColor(coalColor)
+            ctx.fillEllipse(in: CGRect(x: 12, y: 19, width: 2.2, height: 2.2))
+            ctx.fillEllipse(in: CGRect(x: 12, y: 15.5, width: 2.2, height: 2.2))
+        }
+
+        if stage >= 3 {
+            ctx.setFillColor(twigColor)
+            ctx.fill(CGRect(x: 2, y: 18, width: 5, height: 2))
+            ctx.fill(CGRect(x: 19, y: 18, width: 5, height: 2))
+
+            ctx.setFillColor(shadowColor)
+            ctx.fillEllipse(in: CGRect(x: 8, y: 21, width: 10, height: 9))
+            ctx.setFillColor(whiteColor)
+            ctx.fillEllipse(in: CGRect(x: 8.5, y: 21.8, width: 9, height: 8.2))
+
+            ctx.setFillColor(scarfColor)
+            ctx.fill(CGRect(x: 7, y: 21.5, width: 12, height: 3))
+            ctx.fill(CGRect(x: 15, y: 17, width: 3, height: 5.5))
+
+            ctx.setFillColor(coalColor)
+            ctx.fillEllipse(in: CGRect(x: 10.5, y: 26, width: 1.8, height: 1.8))
+            ctx.fillEllipse(in: CGRect(x: 14.5, y: 26, width: 1.8, height: 1.8))
+
+            ctx.setFillColor(carrotColor)
+            ctx.fill(CGRect(x: 13, y: 24, width: 5, height: 2))
+
+            ctx.setFillColor(coalColor)
+            ctx.fill(CGRect(x: 6.5, y: 28.5, width: 13, height: 2))
+            ctx.fill(CGRect(x: 9, y: 30.5, width: 8, height: 3.5))
+            ctx.setFillColor(scarfColor)
+            ctx.fill(CGRect(x: 9, y: 30.5, width: 8, height: 1.2))
+        }
+
+        return ctx.makeImage()
+    }
+
+    private static let elf3DImages: [ElfPose: CGImage] = {
+        var dict: [ElfPose: CGImage] = [:]
+        for pose in ElfPose.allCases {
+            if let img = createElfImage(pose: pose, pixelArt: false) {
+                dict[pose] = img
+            }
+        }
+        return dict
+    }()
+
+    private static let elfPixelImages: [ElfPose: CGImage] = {
+        var dict: [ElfPose: CGImage] = [:]
+        for pose in ElfPose.allCases {
+            if let img = createElfImage(pose: pose, pixelArt: true) {
+                dict[pose] = img
+            }
+        }
+        return dict
+    }()
+
+    private static func elfImage(pose: ElfPose, pixelArt: Bool) -> CGImage? {
+        return pixelArt ? elfPixelImages[pose] : elf3DImages[pose]
+    }
+
+    private static let snowman3DImages: [Int: CGImage] = {
+        var dict: [Int: CGImage] = [:]
+        for s in 1...3 {
+            if let img = createSnowmanImage(stage: s, pixelArt: false) {
+                dict[s] = img
+            }
+        }
+        return dict
+    }()
+
+    private static let snowmanPixelImages: [Int: CGImage] = {
+        var dict: [Int: CGImage] = [:]
+        for s in 1...3 {
+            if let img = createSnowmanImage(stage: s, pixelArt: true) {
+                dict[s] = img
+            }
+        }
+        return dict
+    }()
+
+    private static func snowmanImage(stage: Int, pixelArt: Bool) -> CGImage? {
+        let s = max(1, min(3, stage))
+        return pixelArt ? snowmanPixelImages[s] : snowman3DImages[s]
+    }
 
     // MARK: Gradients for Snowbank
 
@@ -248,6 +599,9 @@ final class SnowOverlayView: NSView {
     private var flakeLayers: [CALayer] = []
     private var sprayLayers: [CALayer] = []
     private var flyingBallLayers: [CALayer] = []
+    private var landedGiftLayers: [CALayer] = []
+    private var elfLayers: [CALayer] = []
+    private var snowmanLayers: [CALayer] = []
 
     // MARK: - Simulation State
 
@@ -258,6 +612,9 @@ final class SnowOverlayView: NSView {
     private var sprayParticles: [SnowSprayParticle] = []
     private var heldSnowball: HeldSnowball?
     private var flyingSnowballs: [FlyingSnowball] = []
+    private var landedGifts: [LandedGift] = []
+    private var snowElves: [SnowElf] = []
+    private var snowmen: [Snowman] = []
     private var timer: Timer?
     private var targetCount: Int = 100
     private var currentIntensity: Double = 0.6
@@ -344,7 +701,7 @@ final class SnowOverlayView: NSView {
         rootLayer.addSublayer(heldBallLayer)
     }
 
-    // MARK: - Public Controls
+    // MARK: - Public Controls & External Impacts
 
     func setIntensity(_ intensity: Double) {
         currentIntensity = intensity
@@ -386,6 +743,9 @@ final class SnowOverlayView: NSView {
         driftBins = Array(repeating: 0, count: numBins)
         sprayParticles.removeAll()
         flyingSnowballs.removeAll()
+        landedGifts.removeAll()
+        snowElves.removeAll()
+        snowmen.removeAll()
         heldSnowball = nil
         lastMousePt = nil
         wasMouseDown = false
@@ -399,6 +759,12 @@ final class SnowOverlayView: NSView {
         sprayLayers.removeAll()
         for l in flyingBallLayers { l.removeFromSuperlayer() }
         flyingBallLayers.removeAll()
+        for l in landedGiftLayers { l.removeFromSuperlayer() }
+        landedGiftLayers.removeAll()
+        for l in elfLayers { l.removeFromSuperlayer() }
+        elfLayers.removeAll()
+        for l in snowmanLayers { l.removeFromSuperlayer() }
+        snowmanLayers.removeAll()
         for l in streakLayers { l.removeFromSuperlayer() }
         streakLayers.removeAll()
         for l in aimDotLayers { l.removeFromSuperlayer() }
@@ -408,6 +774,28 @@ final class SnowOverlayView: NSView {
         CATransaction.commit()
 
         malloc_zone_pressure_relief(nil, 0)
+    }
+
+    func receiveSantaCrash(atLocalX x: CGFloat) {
+        let w = max(bounds.width, 1.0)
+        for i in 0..<numBins {
+            let binX = (CGFloat(i) / CGFloat(numBins - 1)) * w
+            let dist = abs(binX - x)
+            if dist < 32.0 {
+                driftBins[i] = min(driftBins[i], max(3.0, driftBins[i] * 0.25))
+            } else if dist < 60.0 {
+                driftBins[i] = min(40.0, driftBins[i] + 7.5 * (1.0 - (dist - 32.0) / 28.0))
+            }
+        }
+        explodeBall(at: NSPoint(x: x, y: 16.0), count: 38)
+    }
+
+    func addLandedGift(atLocalX x: CGFloat, style: IconStyle) {
+        let clampedX = max(18.0, min(max(18.0, bounds.width - 18.0), x))
+        if landedGifts.count >= 8 {
+            landedGifts.removeFirst()
+        }
+        landedGifts.append(LandedGift(x: clampedX, age: 0.0, maxAge: 10.0, style: style))
     }
 
     private func adjustFlakeCount() {
@@ -468,12 +856,56 @@ final class SnowOverlayView: NSView {
         )
     }
 
+    private func nearestLandedGift(forElfAt x: CGFloat, excludingElfIdx elfIdx: Int) -> (Int, LandedGift)? {
+        guard !landedGifts.isEmpty else { return nil }
+        var bestIdx: Int?
+        var bestDist: CGFloat = .greatestFiniteMagnitude
+
+        for (gIdx, gift) in landedGifts.enumerated() {
+            guard gift.age > 1.8 else { continue }
+            let alreadyTargeted = snowElves.enumerated().contains { (idx, other) in
+                idx != elfIdx && abs(other.targetX - gift.x) < 16.0
+            }
+            if alreadyTargeted { continue }
+
+            let dist = abs(gift.x - x)
+            if dist < bestDist {
+                bestDist = dist
+                bestIdx = gIdx
+            }
+        }
+
+        if let idx = bestIdx {
+            return (idx, landedGifts[idx])
+        }
+        return nil
+    }
+
+    private func poseForElf(_ elf: SnowElf) -> ElfPose {
+        switch elf.behavior {
+        case .knockedDown:
+            return .knockedDown
+        case .throwingCounterBall:
+            return .throwBall
+        case .rescuingSanta, .shoveling:
+            return .dig
+        case .fetchingGift, .buildingSnowman:
+            if elf.carryingGift { return .carryGift }
+            return (Int(elf.animTime * 8.0) % 2 == 0) ? .walk0 : .walk1
+        case .patrolling:
+            if elf.carryingGift { return .carryGift }
+            if currentIntensity > 0.75 { return .plow }
+            return (Int(elf.animTime * 8.0) % 2 == 0) ? .walk0 : .walk1
+        }
+    }
+
     private func step() {
         let w = bounds.width
         let h = bounds.height
         guard w > 0, h > 0 else { return }
 
         time += 1.0 / 30.0
+        let dt = 1.0 / 30.0
 
         let rawMousePt = window?.convertPoint(fromScreen: NSEvent.mouseLocation)
         let mouseInside = (rawMousePt != nil && bounds.contains(rawMousePt!))
@@ -486,6 +918,28 @@ final class SnowOverlayView: NSView {
         let mouseBin = min(numBins - 1, max(0, Int((rawMousePt?.x ?? 0) / binW)))
         let bankH = driftBins[mouseBin]
         let maxH: CGFloat = currentIntensity > 0.75 ? 36.0 : 20.0
+
+        // Sincronizar monitos con AppState.shared.snowElvesMode.count
+        let targetElves = AppState.shared.snowElvesMode.count
+        if snowElves.count < targetElves {
+            while snowElves.count < targetElves {
+                let idx = snowElves.count
+                let spawnX = w * CGFloat(idx + 1) / CGFloat(targetElves + 1)
+                let targetX = CGFloat.random(in: 50...max(60, w - 50))
+                snowElves.append(SnowElf(
+                    x: spawnX,
+                    facingRight: Bool.random(),
+                    behavior: .patrolling,
+                    stateTimer: 0.0,
+                    targetX: targetX,
+                    animTime: Double(idx) * 0.4,
+                    carryingGift: false,
+                    buildCooldown: Double(idx) * 3.0 + 4.0
+                ))
+            }
+        } else if snowElves.count > targetElves {
+            snowElves.removeLast(snowElves.count - targetElves)
+        }
 
         // Suavizado continuo de difusion entre bins contiguos
         var smoothed = driftBins
@@ -565,7 +1019,7 @@ final class SnowOverlayView: NSView {
         if !isMouseDown, let held = heldSnowball {
             let vx = max(-28.0, min(28.0, throwVX * 1.35))
             let vy = max(5.0, min(30.0, throwVY * 1.35 + 4.0))
-            flyingSnowballs.append(FlyingSnowball(x: held.x, y: held.y, vx: vx, vy: vy, radius: held.radius))
+            flyingSnowballs.append(FlyingSnowball(x: held.x, y: held.y, vx: vx, vy: vy, radius: held.radius, isFromElf: false, age: 0.0))
             heldSnowball = nil
         }
         wasMouseDown = isMouseDown
@@ -573,9 +1027,10 @@ final class SnowOverlayView: NSView {
         // 5. Fisica de bolas volando (flyingSnowballs) y colisiones
         var remainingBalls: [FlyingSnowball] = []
         for var ball in flyingSnowballs {
+            ball.age += dt
             ball.x += ball.vx
             ball.y += ball.vy
-            ball.vy -= 0.55
+            ball.vy -= ball.isFromElf ? 0.32 : 0.55
 
             sprayParticles.append(SnowSprayParticle(
                 x: ball.x + CGFloat.random(in: (-2.0)...2.0),
@@ -589,19 +1044,82 @@ final class SnowOverlayView: NSView {
             ))
 
             var didHitTarget = false
-            if let win = window {
-                let screenPt = win.convertPoint(toScreen: NSPoint(x: ball.x, y: ball.y))
-                if ScreenEffectsManager.shared.handleSnowballImpact(atScreenPoint: screenPt) {
+
+            if !ball.isFromElf {
+                // Target 1: Sleigh
+                if let win = window {
+                    let screenPt = win.convertPoint(toScreen: NSPoint(x: ball.x, y: ball.y))
+                    if ScreenEffectsManager.shared.handleSnowballImpact(atScreenPoint: screenPt) {
+                        didHitTarget = true
+                        explodeBall(at: NSPoint(x: ball.x, y: ball.y), count: 24)
+                    }
+                }
+
+                // Target 2: SnowElves
+                if !didHitTarget {
+                    for eIdx in 0..<snowElves.count {
+                        let elfX = snowElves[eIdx].x
+                        let elfBin = min(numBins - 1, max(0, Int((elfX / max(1.0, w)) * CGFloat(numBins))))
+                        let elfBankY = driftBins[elfBin]
+                        if hypot(ball.x - elfX, ball.y - (elfBankY + 12.0)) < 22.0 {
+                            snowElves[eIdx].behavior = .knockedDown
+                            snowElves[eIdx].stateTimer = 0.0
+                            snowElves[eIdx].carryingGift = false
+                            explodeBall(at: NSPoint(x: ball.x, y: ball.y), count: 22)
+                            didHitTarget = true
+                            break
+                        }
+                    }
+                }
+
+                // Target 3: Snowmen
+                if !didHitTarget {
+                    for sIdx in (0..<snowmen.count).reversed() {
+                        let smX = snowmen[sIdx].x
+                        let smBin = min(numBins - 1, max(0, Int((smX / max(1.0, w)) * CGFloat(numBins))))
+                        let smBankY = driftBins[smBin]
+                        if hypot(ball.x - smX, ball.y - (smBankY + 14.0)) < 22.0 {
+                            driftBins[smBin] = min(maxH, driftBins[smBin] + 3.0)
+                            snowmen.remove(at: sIdx)
+                            explodeBall(at: NSPoint(x: ball.x, y: ball.y), count: 32)
+                            didHitTarget = true
+                            break
+                        }
+                    }
+                }
+            } else {
+                // Ball thrown by elf
+                if mouseInside, let mp = rawMousePt, ball.age >= 0.15, hypot(ball.x - mp.x, ball.y - mp.y) <= 24.0 {
+                    explodeBall(at: NSPoint(x: ball.x, y: ball.y), count: 22)
+                    for fIdx in 0..<flakes.count {
+                        let fdx = flakes[fIdx].x - mp.x
+                        let fdy = flakes[fIdx].y - mp.y
+                        let fdist = hypot(fdx, fdy)
+                        if fdist < 60.0 {
+                            flakes[fIdx].vx += (fdx / max(8.0, fdist)) * 4.0
+                            flakes[fIdx].y += (fdy / max(8.0, fdist)) * 2.0
+                        }
+                    }
                     didHitTarget = true
-                    explodeBall(at: NSPoint(x: ball.x, y: ball.y), count: 24)
+                }
+
+                if !didHitTarget && ball.age >= 0.25, let win = window {
+                    let screenPt = win.convertPoint(toScreen: NSPoint(x: ball.x, y: ball.y))
+                    if ScreenEffectsManager.shared.handleSnowballImpact(atScreenPoint: screenPt) {
+                        didHitTarget = true
+                        explodeBall(at: NSPoint(x: ball.x, y: ball.y), count: 24)
+                    }
                 }
             }
+
             if didHitTarget { continue }
 
             let ballBin = min(numBins - 1, max(0, Int(ball.x / binW)))
             let bankAtBall = driftBins[ballBin]
-            if ball.x < 6 || ball.x > w - 6 || ball.y > h - 6 || ball.y <= bankAtBall {
-                if ball.y <= bankAtBall {
+            let canHitGround = !ball.isFromElf || ball.age >= 0.35
+
+            if ball.x < 6 || ball.x > w - 6 || ball.y > h - 6 || (canHitGround && ball.y <= bankAtBall) {
+                if canHitGround && ball.y <= bankAtBall {
                     driftBins[ballBin] = min(maxH, driftBins[ballBin] + 2.2)
                 }
                 explodeBall(at: NSPoint(x: ball.x, y: ball.y), count: 20)
@@ -631,7 +1149,287 @@ final class SnowOverlayView: NSView {
         }
         sprayParticles = remainingSpray
 
-        // 7. Copos cayendo y rafagas Blizzard
+        // 7. Actualizacion de regalos posados en el manto
+        var remainingGifts: [LandedGift] = []
+        for var gift in landedGifts {
+            gift.age += 1.0 / 30.0
+            let giftBin = min(numBins - 1, max(0, Int((gift.x / max(1.0, w)) * CGFloat(numBins))))
+            let giftY = driftBins[giftBin] + 6.0
+
+            if mouseInside && heldSnowball == nil, let mp = rawMousePt, hypot(mp.x - gift.x, mp.y - giftY) < 26.0 {
+                explodeBall(at: NSPoint(x: gift.x, y: giftY + 4.0), count: 16)
+                continue
+            }
+
+            if gift.age < gift.maxAge {
+                remainingGifts.append(gift)
+            }
+        }
+        landedGifts = remainingGifts
+
+        // 8. Maquina de estados de los Monitos de Nieve (Fases 6 y 7)
+        let groundedSantaX = ScreenEffectsManager.shared.groundedSantaX(onWindow: window)
+
+        for i in 0..<snowElves.count {
+            snowElves[i].stateTimer += dt
+            snowElves[i].animTime += dt
+            snowElves[i].buildCooldown = max(0, snowElves[i].buildCooldown - dt)
+
+            let isBusyKO: Bool
+            switch snowElves[i].behavior {
+            case .knockedDown, .throwingCounterBall:
+                isBusyKO = true
+            default:
+                isBusyKO = false
+            }
+
+            let elfBin = min(numBins - 1, max(0, Int((snowElves[i].x / max(1.0, w)) * CGFloat(numBins))))
+            let elfBankY = driftBins[elfBin]
+
+            if !isBusyKO {
+                // Prioridad 1: Rescate a Santa caido
+                if let sx = groundedSantaX {
+                    let stationX = max(30.0, min(w - 30.0, sx + (i == 0 ? -18.0 : (i == 1 ? 18.0 : -30.0))))
+                    snowElves[i].behavior = .rescuingSanta
+                    snowElves[i].targetX = stationX
+                    let diff = stationX - snowElves[i].x
+                    snowElves[i].facingRight = diff >= 0
+                    if abs(diff) > 18.0 {
+                        let step = min(abs(diff), 2.3)
+                        snowElves[i].x += (diff > 0 ? 1.0 : -1.0) * step
+                    } else {
+                        snowElves[i].facingRight = sx >= snowElves[i].x
+                        let minB = max(0, elfBin - 1)
+                        let maxB = min(numBins - 1, elfBin + 1)
+                        for b in minB...maxB {
+                            if driftBins[b] > 5.0 {
+                                driftBins[b] = max(5.0, driftBins[b] - 0.12)
+                            }
+                        }
+                        if Int(snowElves[i].animTime * 30.0) % 5 == 0 {
+                            sprayParticles.append(SnowSprayParticle(
+                                x: snowElves[i].x + (snowElves[i].facingRight ? 8.0 : -8.0),
+                                y: elfBankY + 8.0,
+                                vx: (snowElves[i].facingRight ? 1.0 : -1.0) * CGFloat.random(in: 2.0...6.0),
+                                vy: CGFloat.random(in: 3.5...7.5),
+                                radius: 2.0,
+                                opacity: 0.8,
+                                age: 0,
+                                maxAge: 0.4
+                            ))
+                        }
+                        ScreenEffectsManager.shared.assistGroundedSanta(onWindow: window, amount: 0.042)
+                    }
+                } else if !snowElves[i].carryingGift, let (giftIdx, gift) = nearestLandedGift(forElfAt: snowElves[i].x, excludingElfIdx: i) {
+                    // Prioridad 2: Recoger regalo posado
+                    snowElves[i].behavior = .fetchingGift
+                    snowElves[i].targetX = gift.x
+                    let diff = gift.x - snowElves[i].x
+                    snowElves[i].facingRight = diff >= 0
+                    if abs(diff) > 14.0 {
+                        let step = min(abs(diff), 1.45)
+                        snowElves[i].x += (diff > 0 ? 1.0 : -1.0) * step
+                    } else {
+                        snowElves[i].carryingGift = true
+                        if giftIdx < landedGifts.count {
+                            landedGifts.remove(at: giftIdx)
+                        }
+                        snowElves[i].targetX = (snowElves[i].x < w * 0.5) ? 38.0 : max(38.0, w - 38.0)
+                        snowElves[i].behavior = .patrolling
+                        snowElves[i].stateTimer = 0.0
+                    }
+                }
+            }
+
+            switch snowElves[i].behavior {
+            case .knockedDown:
+                if snowElves[i].stateTimer >= 1.15 {
+                    snowElves[i].behavior = .throwingCounterBall
+                    snowElves[i].stateTimer = 0.0
+                }
+
+            case .throwingCounterBall:
+                if let mp = rawMousePt {
+                    snowElves[i].facingRight = mp.x >= snowElves[i].x
+                }
+                let prevT = snowElves[i].stateTimer - dt
+                if prevT < 0.24 && snowElves[i].stateTimer >= 0.24 {
+                    let elfHandX = snowElves[i].x + (snowElves[i].facingRight ? 8.0 : -8.0)
+                    let elfHandY = elfBankY + 16.0
+                    let vx: CGFloat
+                    let vy: CGFloat
+                    if let mp = rawMousePt, mp.y > 40.0 {
+                        let tAir: CGFloat = 36.0
+                        vx = max(-18.0, min(18.0, (mp.x - elfHandX) / tAir))
+                        vy = max(8.0, min(24.0, (mp.y - elfHandY) / tAir + 0.32 * 0.5 * tAir))
+                    } else {
+                        vx = CGFloat.random(in: (-5.5)...5.5)
+                        vy = CGFloat.random(in: 13.5...18.5)
+                    }
+                    flyingSnowballs.append(FlyingSnowball(
+                        x: elfHandX,
+                        y: elfHandY,
+                        vx: vx,
+                        vy: vy,
+                        radius: 5.0,
+                        isFromElf: true,
+                        age: 0.0
+                    ))
+                }
+                if snowElves[i].stateTimer >= 0.55 {
+                    snowElves[i].behavior = .patrolling
+                    snowElves[i].targetX = CGFloat.random(in: 50...max(60, w - 50))
+                    snowElves[i].stateTimer = 0.0
+                }
+
+            case .patrolling:
+                if groundedSantaX == nil {
+                    let diff = snowElves[i].targetX - snowElves[i].x
+                    snowElves[i].facingRight = diff >= 0
+                    let moveSpeed: CGFloat = (currentIntensity > 0.75) ? 1.65 : 1.25
+                    if abs(diff) > 10.0 {
+                        let step = min(abs(diff), moveSpeed)
+                        snowElves[i].x += (diff > 0 ? 1.0 : -1.0) * step
+                        if currentIntensity > 0.75 && !snowElves[i].carryingGift {
+                            if driftBins[elfBin] > 7.5 {
+                                driftBins[elfBin] = max(5.0, driftBins[elfBin] - 0.18)
+                            }
+                            if Int(snowElves[i].animTime * 30.0) % 6 == 0 {
+                                let plowDir: CGFloat = snowElves[i].facingRight ? 1.0 : -1.0
+                                sprayParticles.append(SnowSprayParticle(
+                                    x: snowElves[i].x + plowDir * 10.0,
+                                    y: elfBankY + 4.0,
+                                    vx: plowDir * CGFloat.random(in: 2.0...5.0),
+                                    vy: CGFloat.random(in: 2.0...5.5),
+                                    radius: 1.8,
+                                    opacity: 0.7,
+                                    age: 0,
+                                    maxAge: 0.35
+                                ))
+                            }
+                        }
+                    } else {
+                        if snowElves[i].carryingGift {
+                            explodeBall(at: NSPoint(x: snowElves[i].x, y: elfBankY + 10.0), count: 10)
+                            snowElves[i].carryingGift = false
+                        }
+
+                        var didStartSnowman = false
+                        if snowmen.count < 2 && snowElves[i].buildCooldown <= 0 {
+                            let leftCandidate = CGFloat.random(in: 70...min(160, max(75, w * 0.3)))
+                            let rightCandidate = CGFloat.random(in: max(180, w - 160)...max(190, w - 70))
+                            let candidates = [leftCandidate, rightCandidate]
+                            for cX in candidates {
+                                let cBin = min(numBins - 1, max(0, Int((cX / max(1.0, w)) * CGFloat(numBins))))
+                                if driftBins[cBin] >= 10.5 && !snowmen.contains(where: { abs($0.x - cX) < 120.0 }) {
+                                    snowElves[i].behavior = .buildingSnowman(targetX: cX)
+                                    snowElves[i].stateTimer = 0.0
+                                    didStartSnowman = true
+                                    break
+                                }
+                            }
+                        }
+
+                        if !didStartSnowman {
+                            if driftBins[elfBin] > 9.0 {
+                                snowElves[i].behavior = .shoveling
+                                snowElves[i].stateTimer = 0.0
+                            } else {
+                                var highestBin = 0
+                                var highestH: CGFloat = 0
+                                for b in 10..<(numBins - 10) {
+                                    if driftBins[b] > highestH {
+                                        highestH = driftBins[b]
+                                        highestBin = b
+                                    }
+                                }
+                                let nextX = (highestH > 9.0 && Bool.random()) ?
+                                    (CGFloat(highestBin) / CGFloat(numBins - 1)) * w :
+                                    CGFloat.random(in: 50...max(60, w - 50))
+                                snowElves[i].targetX = nextX
+                            }
+                        }
+                    }
+                }
+
+            case .shoveling:
+                let minB = max(0, elfBin - 1)
+                let maxB = min(numBins - 1, elfBin + 1)
+                for b in minB...maxB {
+                    driftBins[b] = max(5.5, driftBins[b] - 0.22)
+                }
+                if Int(snowElves[i].animTime * 30.0) % 4 == 0 {
+                    let sprayDir: CGFloat = snowElves[i].facingRight ? -1.0 : 1.0
+                    sprayParticles.append(SnowSprayParticle(
+                        x: snowElves[i].x + sprayDir * 6.0,
+                        y: elfBankY + 6.0,
+                        vx: sprayDir * CGFloat.random(in: 2.0...5.5),
+                        vy: CGFloat.random(in: 3.5...7.5),
+                        radius: 2.0,
+                        opacity: 0.75,
+                        age: 0,
+                        maxAge: 0.38
+                    ))
+                }
+                if driftBins[elfBin] <= 6.0 || snowElves[i].stateTimer >= 1.8 {
+                    snowElves[i].behavior = .patrolling
+                    snowElves[i].targetX = CGFloat.random(in: 50...max(60, w - 50))
+                    snowElves[i].stateTimer = 0.0
+                }
+
+            case .rescuingSanta:
+                if groundedSantaX == nil {
+                    snowElves[i].behavior = .patrolling
+                    snowElves[i].targetX = CGFloat.random(in: 50...max(60, w - 50))
+                    snowElves[i].stateTimer = 0.0
+                }
+
+            case .fetchingGift:
+                if landedGifts.isEmpty && !snowElves[i].carryingGift {
+                    snowElves[i].behavior = .patrolling
+                    snowElves[i].targetX = CGFloat.random(in: 50...max(60, w - 50))
+                    snowElves[i].stateTimer = 0.0
+                }
+
+            case .buildingSnowman(let buildX):
+                let diff = buildX - snowElves[i].x
+                snowElves[i].facingRight = diff >= 0
+                if abs(diff) > 14.0 {
+                    let step = min(abs(diff), 1.35)
+                    snowElves[i].x += (diff > 0 ? 1.0 : -1.0) * step
+                } else {
+                    let smIdx = snowmen.firstIndex(where: { abs($0.x - buildX) < 20.0 })
+                    if let idx = smIdx {
+                        snowmen[idx].buildProgress += dt / 2.6
+                        if snowmen[idx].buildProgress < 0.33 {
+                            snowmen[idx].stage = 1
+                        } else if snowmen[idx].buildProgress < 0.75 {
+                            snowmen[idx].stage = 2
+                        } else {
+                            snowmen[idx].stage = 3
+                        }
+                        let smBin = min(numBins - 1, max(0, Int((buildX / max(1.0, w)) * CGFloat(numBins))))
+                        if driftBins[smBin] > 4.5 {
+                            driftBins[smBin] = max(4.5, driftBins[smBin] - 0.05)
+                        }
+                        if snowmen[idx].buildProgress >= 1.0 {
+                            snowmen[idx].stage = 3
+                            snowElves[i].buildCooldown = 14.0
+                            snowElves[i].behavior = .patrolling
+                            snowElves[i].targetX = CGFloat.random(in: 50...max(60, w - 50))
+                            snowElves[i].stateTimer = 0.0
+                        }
+                    } else if snowmen.count < 2 {
+                        snowmen.append(Snowman(x: buildX, stage: 1, buildProgress: 0.0))
+                    } else {
+                        snowElves[i].behavior = .patrolling
+                        snowElves[i].stateTimer = 0.0
+                    }
+                }
+            }
+        }
+
+        // 9. Copos cayendo y rafagas Blizzard
         let speedMult: CGFloat
         let windGust: CGFloat
         if currentIntensity <= 0.4 {
@@ -741,6 +1539,7 @@ final class SnowOverlayView: NSView {
         }
 
         let isPixelFlakes = (AppState.shared.snowflakesStyle == .pixelArt)
+        let isPixelElves = (AppState.shared.snowElvesStyle == .pixelArt)
 
         // 3. Falling snowflakes layer pool
         while flakeLayers.count < flakes.count {
@@ -869,6 +1668,90 @@ final class SnowOverlayView: NSView {
             heldBallLayer.isHidden = true
             for layer in aimDotLayers {
                 layer.isHidden = true
+            }
+        }
+
+        // 7. Regalos posados sobre el manto inferior layer pool
+        while landedGiftLayers.count < landedGifts.count {
+            let l = CALayer()
+            l.actions = Self.noAnimActions
+            l.zPosition = 4
+            l.bounds = CGRect(x: 0, y: 0, width: 18, height: 18)
+            l.anchorPoint = CGPoint(x: 0.5, y: 0.5)
+            rootLayer.addSublayer(l)
+            landedGiftLayers.append(l)
+        }
+
+        for i in 0..<landedGiftLayers.count {
+            if i < landedGifts.count {
+                let gift = landedGifts[i]
+                let layer = landedGiftLayers[i]
+                layer.isHidden = false
+                layer.contents = (gift.style == .pixelArt) ? Self.landedGiftPixelImage : Self.landedGift3DImage
+                layer.magnificationFilter = (gift.style == .pixelArt) ? .nearest : .linear
+                let giftBin = min(numBins - 1, max(0, Int((gift.x / max(1.0, w)) * CGFloat(numBins))))
+                let giftY = driftBins[giftBin] + 6.0
+                layer.position = CGPoint(x: gift.x, y: giftY)
+                let fade = (gift.maxAge - gift.age) < 1.0 ? max(0.0, gift.maxAge - gift.age) : 1.0
+                layer.opacity = Float(fade)
+            } else {
+                landedGiftLayers[i].isHidden = true
+            }
+        }
+
+        // 8. Munecos de nieve layer pool
+        while snowmanLayers.count < snowmen.count {
+            let l = CALayer()
+            l.actions = Self.noAnimActions
+            l.zPosition = 3.5
+            l.bounds = CGRect(x: 0, y: 0, width: 26, height: 34)
+            l.anchorPoint = CGPoint(x: 0.5, y: 0.1)
+            rootLayer.addSublayer(l)
+            snowmanLayers.append(l)
+        }
+
+        for i in 0..<snowmanLayers.count {
+            if i < snowmen.count {
+                let sm = snowmen[i]
+                let layer = snowmanLayers[i]
+                layer.isHidden = false
+                layer.contents = Self.snowmanImage(stage: sm.stage, pixelArt: isPixelElves)
+                layer.magnificationFilter = isPixelElves ? .nearest : .linear
+                let smBin = min(numBins - 1, max(0, Int((sm.x / max(1.0, w)) * CGFloat(numBins))))
+                let smY = driftBins[smBin] - 1.0
+                layer.position = CGPoint(x: sm.x, y: smY)
+                layer.opacity = 1.0
+            } else {
+                snowmanLayers[i].isHidden = true
+            }
+        }
+
+        // 9. Monitos limpiadores layer pool
+        while elfLayers.count < snowElves.count {
+            let l = CALayer()
+            l.actions = Self.noAnimActions
+            l.zPosition = 4.5
+            l.bounds = CGRect(x: 0, y: 0, width: 24, height: 28)
+            l.anchorPoint = CGPoint(x: 0.5, y: 0.08)
+            rootLayer.addSublayer(l)
+            elfLayers.append(l)
+        }
+
+        for i in 0..<elfLayers.count {
+            if i < snowElves.count {
+                let elf = snowElves[i]
+                let layer = elfLayers[i]
+                layer.isHidden = false
+                let pose = poseForElf(elf)
+                layer.contents = Self.elfImage(pose: pose, pixelArt: isPixelElves)
+                layer.magnificationFilter = isPixelElves ? .nearest : .linear
+                let elfBin = min(numBins - 1, max(0, Int((elf.x / max(1.0, w)) * CGFloat(numBins))))
+                let elfY = max(2.0, driftBins[elfBin] - 2.0)
+                layer.position = CGPoint(x: elf.x, y: elfY)
+                layer.transform = CATransform3DMakeScale(elf.facingRight ? 1.0 : -1.0, 1.0, 1.0)
+                layer.opacity = 1.0
+            } else {
+                elfLayers[i].isHidden = true
             }
         }
 

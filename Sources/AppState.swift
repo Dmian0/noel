@@ -257,6 +257,34 @@ enum SnowLayerMode: String, CaseIterable, Identifiable {
     }
 }
 
+enum SnowElvesMode: String, CaseIterable, Identifiable {
+    case off = "off"
+    case single = "single"
+    case crew = "crew"
+
+    var id: String { rawValue }
+
+    var count: Int {
+        switch self {
+        case .off: return 0
+        case .single: return 1
+        case .crew: return 3
+        }
+    }
+
+    func displayName(in lang: AppLanguage) -> String {
+        switch self {
+        case .off: return lang == .en ? "Off" : "No"
+        case .single: return "1"
+        case .crew: return lang == .en ? "Crew" : "Equipo"
+        }
+    }
+
+    var displayName: String {
+        displayName(in: AppState.shared.language)
+    }
+}
+
 final class AppState: ObservableObject {
     static let shared = AppState()
 
@@ -281,6 +309,8 @@ final class AppState: ObservableObject {
         static let snowflakesStyle = "noel.snowflakesStyle"
         static let snowbankStyle = "noel.snowbankStyle"
         static let lightsStyle = "noel.lightsStyle"
+        static let snowElvesMode = "noel.snowElvesMode"
+        static let snowElvesStyle = "noel.snowElvesStyle"
         static let launchAtLogin = "noel.launchAtLogin"
     }
 
@@ -407,6 +437,18 @@ final class AppState: ObservableObject {
         didSet {
             UserDefaults.standard.set(lightsStyle.rawValue, forKey: Keys.lightsStyle)
             DispatchQueue.main.async { ScreenEffectsManager.shared.syncWithState() }
+        }
+    }
+
+    @Published var snowElvesMode: SnowElvesMode {
+        didSet {
+            UserDefaults.standard.set(snowElvesMode.rawValue, forKey: Keys.snowElvesMode)
+        }
+    }
+
+    @Published var snowElvesStyle: IconStyle {
+        didSet {
+            UserDefaults.standard.set(snowElvesStyle.rawValue, forKey: Keys.snowElvesStyle)
         }
     }
 
@@ -551,6 +593,20 @@ final class AppState: ObservableObject {
             self.lightsStyle = style
         } else {
             self.lightsStyle = .colorful
+        }
+
+        if let rawSnowElvesMode = defaults.string(forKey: Keys.snowElvesMode),
+           let mode = SnowElvesMode(rawValue: rawSnowElvesMode) {
+            self.snowElvesMode = mode
+        } else {
+            self.snowElvesMode = .crew
+        }
+
+        if let rawSnowElvesStyle = defaults.string(forKey: Keys.snowElvesStyle),
+           let style = IconStyle(rawValue: rawSnowElvesStyle) {
+            self.snowElvesStyle = style
+        } else {
+            self.snowElvesStyle = .colorful
         }
 
         self.launchAtLogin = (SMAppService.mainApp.status == .enabled) || (defaults.object(forKey: Keys.launchAtLogin) as? Bool ?? false)

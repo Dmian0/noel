@@ -10,6 +10,9 @@ Hoja de ruta de nuevas funciones planificadas a partir de `v1.0.1` para implemen
 | Fase 2 | Nevada Blizzard Mejorada, Física con el Cursor y Nivel de Capa | `ScreenEffectsManager.swift`, `AppState.swift`, `PopoverContentView.swift` | Completada |
 | Fase 3 | Paletas de Luces, Modo Audio-Reactivo y Viento Invernal | `ScreenEffectsManager.swift`, `AudioManager.swift`, `AppState.swift`, `PopoverContentView.swift` | Completada |
 | Fase 4 | Comodidad en el Día a Día | `main.swift`, `AppState.swift`, `PopoverContentView.swift` | Completada |
+| Fase 5 | Restauracion de Luces Superiores (Sin Hielos) y Derribo Fisico de Santa hasta la Nieve | `ScreenEffectsManager.swift`, `SantaSleighOverlayView.swift`, `SnowOverlayView.swift` | Completada |
+| Fase 6 | Monitos Limpiadores de Nieve (Duendes con Pala y Quitanieves) y Rescate de Santa | `SnowOverlayView.swift`, `ScreenEffectsManager.swift`, `AppState.swift`, `PopoverContentView.swift` | Completada |
+| Fase 7 | Batalla de Bolas de Nieve con los Monitos y Construccion de Munecos de Nieve | `SnowOverlayView.swift`, `ScreenEffectsManager.swift` | Completada |
 
 ---
 
@@ -49,3 +52,28 @@ Hoja de ruta de nuevas funciones planificadas a partir de `v1.0.1` para implemen
 
 - [x] **Modo rápido «Pantalla Compartida / En Llamada» (`main.swift`, `AppState.swift`, `PopoverContentView.swift`):** Atajo **`Option + Clic`** sobre el icono de la barra de menú, botón dedicado con icono de ojo en la cabecera del popover y banner interactivo de reanudación para ocultar o reanudar al instante todos los efectos de pantalla (nieve, luces y trineo) sin perder la configuración activa de cada uno.
 - [x] **Iniciar al encender la Mac (`Launch at Login`) (`AppState.swift`, `PopoverContentView.swift`):** Interruptor nativo basado en `SMAppService` (macOS 13+) en los ajustes del popover para abrir Noël automáticamente al iniciar sesión en macOS.
+
+---
+
+## Fase 5: Restauracion de Luces Superiores (Sin Hielos) y Derribo Fisico de Santa hasta la Nieve
+**Objetivo:** Devolver un aspecto limpio, calido y luminoso a la guirnalda superior eliminando los pedazos de hielo y agregando un halo radial difuminado real, y anadir fisica completa de derribo para que Santa aterrice en el manto de nieve inferior y suelte regalos interactivos.
+
+- [x] **Guirnalda luminosa limpia con halo radial difuminado real (`ScreenEffectsManager.swift`):** Eliminacion total de los carambanos, esquirlas de hielo y linea de escarcha sobre el cable; reemplazo de los circulos planos de borde duro por texturas de halo radial suave (`CGGradient`) en modo `Color 3D` y halo escalonado retro en `Pixel Art`, con casquillo metalico y reflejo especular en cada bombilla.
+- [x] **Derribo fisico de Santa hasta el banco de nieve inferior (`SantaSleighOverlayView.swift`, `SnowOverlayView.swift`, `ScreenEffectsManager.swift`):** Al impactar a Santa con una bola de nieve, el trineo pierde estabilidad, cae en parabola echando chispas y aterriza de emergencia sobre la nieve acumulada abajo, excavando un crater fisico en el manto de nieve, levantando una nube de nieve y quedando aturdido con estrellas giratorias durante unos segundos antes de reincorporarse y despegar.
+- [x] **Regalos posados sobre el manto de nieve e interactivos con el cursor (`SantaSleighOverlayView.swift`, `SnowOverlayView.swift`):** Los regalos que caen en paracaidas (o se sueltan al derribar a Santa) se posan fisicamente sobre la curva del banco de nieve inferior y pueden abrirse al pasar el cursor por encima con un estallido de particulas.
+
+---
+
+## Fase 6: Monitos Limpiadores de Nieve (Duendes con Pala y Quitanieves) y Rescate de Santa
+**Objetivo:** Poblar el manto de nieve inferior con duendes trabajadores que limpian la nieve acumulada en tiempo real y asisten al trineo de Santa si cae derribado.
+
+- [x] **Cuadrilla de monitos limpiadores en el banco de nieve (`SnowOverlayView.swift`, `AppState.swift`, `PopoverContentView.swift`):** Duendes navidenos animados (con selector `No`, `1`, `Equipo` y estilo `3D | PX`) que caminan sobre la nieve acumulada paleando los monticulos reales (`driftBins`) y sacando un quitanieves ancho durante tormentas `Blizzard`.
+- [x] **Operativo de rescate a Santa y recoleccion de regalos (`SnowOverlayView.swift`, `SantaSleighOverlayView.swift`):** Cuando Santa cae derribado en la nieve, los monitos corren hacia el trineo para desenterrarlo y empujarlo para que despegue mas rapido; tambien recogen los regalos posados en la nieve que el usuario no haya abierto.
+
+---
+
+## Fase 7: Batalla de Bolas de Nieve con los Monitos y Construccion de Munecos de Nieve
+**Objetivo:** Hacer interactivos a los duendes limpiadores mediante una batalla amistosa de bolas de nieve y construccion autonoma de munecos de nieve en el borde inferior.
+
+- [x] **Reaccion a bolazos y contraataque hacia el cursor del mouse (`SnowOverlayView.swift`):** Si el usuario golpea a un monito con una bola de nieve, este cae sentado en la nieve, se sacude y lanza una bolita de nieve de regreso en direccion a la posicion actual del cursor del mouse (o hacia arriba).
+- [x] **Construccion de munecos de nieve destructibles (`SnowOverlayView.swift`):** Cuando hay suficiente nieve acumulada en las esquinas, los monitos arman un muneco de nieve (en `Color 3D` o `Pixel Art`) que adorna la base hasta que el usuario lo derriba de un bolazo.

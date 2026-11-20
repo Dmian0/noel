@@ -139,6 +139,13 @@ final class SantaSleighOverlayView: NSView {
     private static let giftPixelImage: CGImage? = createGiftImage(pixelArt: true)
 
     // MARK: - Internal Types
+    private enum FlightState {
+        case cruising
+        case crashing
+        case grounded
+        case recovering
+    }
+
     private struct StardustParticle {
         var x, y, vx, vy: CGFloat
         var age, maxAge: Double
@@ -173,7 +180,38 @@ final class SantaSleighOverlayView: NSView {
     private var particles: [StardustParticle] = []
     private var giftDrops: [GiftDrop] = []
 
+    private var flightState: FlightState = .cruising
+    private var caravanX: CGFloat = 0
+    private var caravanY: CGFloat = 0
+    private var crashVX: CGFloat = 0
+    private var crashVY: CGFloat = 0
+    private var crashAngle: CGFloat = 0
+    private var groundedTimer: Double = 0
+
     // MARK: - Public API
+    var groundedSantaLocalX: CGFloat? {
+        flightState == .grounded ? caravanX : nil
+    }
+
+    func assistSantaRecovery(amount: Double) {
+        guard flightState == .grounded else { return }
+        groundedTimer += amount
+        if Int.random(in: 0...2) == 0 {
+            particles.append(StardustParticle(
+                x: caravanX + CGFloat.random(in: (-22)...22),
+                y: caravanY + CGFloat.random(in: 4...22),
+                vx: CGFloat.random(in: (-25)...25),
+                vy: CGFloat.random(in: 18...48),
+                age: 0.0,
+                maxAge: 0.45,
+                size: 3.4,
+                twinklePhase: Double.random(in: 0...(.pi * 2)),
+                isSparkle: true,
+                isGold: true
+            ))
+        }
+    }
+
     func startFlight(leftToRight: Bool, style: IconStyle, onComplete: @escaping () -> Void) {
         stop()
         self.leftToRight = leftToRight
@@ -184,6 +222,13 @@ final class SantaSleighOverlayView: NSView {
         self.particles.removeAll()
         self.giftDrops.removeAll()
         self.hasDroppedGift = false
+        self.flightState = .cruising
+        self.caravanX = 0
+        self.caravanY = 0
+        self.crashVX = 0
+        self.crashVY = 0
+        self.crashAngle = 0
+        self.groundedTimer = 0
 
         let t = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in self?.tick() }
         RunLoop.main.add(t, forMode: .common)
@@ -198,6 +243,13 @@ final class SantaSleighOverlayView: NSView {
         hasDroppedGift = false
         elapsed = 0.0
         onComplete = nil
+        flightState = .cruising
+        caravanX = 0
+        caravanY = 0
+        crashVX = 0
+        crashVY = 0
+        crashAngle = 0
+        groundedTimer = 0
 
         CATransaction.begin()
         CATransaction.setDisableActions(true)
@@ -211,23 +263,19 @@ final class SantaSleighOverlayView: NSView {
     }
 
     func handleSnowballImpact(at screenPoint: NSPoint) -> Bool {
-        guard timer != nil, elapsed <= flightDuration, let win = window else { return false }
+        guard timer != nil, (flightState == .cruising || flightState == .recovering), let win = window else { return false }
         let pt = win.convertPoint(fromScreen: screenPoint)
-        let progress = min(1.0, elapsed / flightDuration)
-        let w = bounds.width > 0 ? bounds.width : 1200.0
-        let startX = leftToRight ? -150.0 : w + 150.0
-        let endX = leftToRight ? w + 150.0 : -150.0
-        let caravanX = startX + (endX - startX) * CGFloat(progress)
-        let caravanY = yForProgress(progress, elapsed: elapsed)
 
-        guard hypot(pt.x - caravanX, pt.y - caravanY) <= 78.0 else { return false }
+        let targetX = caravanX
+        let targetY = caravanY
+        guard hypot(pt.x - targetX, pt.y - targetY) <= 82.0 else { return false }
 
-        for _ in 0..<24 {
+        for _ in 0..<28 {
             let angle = Double.random(in: 0...(.pi * 2))
             let speed = CGFloat.random(in: 30...95)
             particles.append(StardustParticle(
-                x: caravanX + CGFloat.random(in: (-12)...12),
-                y: caravanY + CGFloat.random(in: (-10)...10),
+                x: targetX + CGFloat.random(in: (-12)...12),
+                y: targetY + CGFloat.random(in: (-10)...10),
                 vx: CGFloat(cos(angle)) * speed,
                 vy: CGFloat(sin(angle)) * speed,
                 age: 0.0,
@@ -238,7 +286,16 @@ final class SantaSleighOverlayView: NSView {
                 isGold: Bool.random()
             ))
         }
-        giftDrops.append(GiftDrop(baseX: caravanX, y: caravanY - 6.0, vy: 62.0, age: 0.0))
+
+        giftDrops.append(GiftDrop(baseX: targetX - 26.0, y: targetY - 6.0, vy: 56.0, age: 0.0))
+        giftDrops.append(GiftDrop(baseX: targetX, y: targetY - 6.0, vy: 64.0, age: 0.0))
+        giftDrops.append(GiftDrop(baseX: targetX + 26.0, y: targetY - 6.0, vy: 52.0, age: 0.0))
+
+        flightState = .crashing
+        let dir: CGFloat = leftToRight ? 1.0 : -1.0
+        crashVX = dir * 110.0
+        crashVY = 50.0
+        crashAngle = 0.0
         return true
     }
 
@@ -269,25 +326,98 @@ final class SantaSleighOverlayView: NSView {
     private func tick() {
         let dt = 1.0 / 30.0
         elapsed += dt
-        let progress = min(1.0, elapsed / flightDuration)
         let w = bounds.width > 0 ? bounds.width : 1200.0
+        let h = bounds.height > 0 ? bounds.height : 800.0
         let startX = leftToRight ? -150.0 : w + 150.0
         let endX = leftToRight ? w + 150.0 : -150.0
-        let caravanX = startX + (endX - startX) * CGFloat(progress)
-        let caravanY = yForProgress(progress, elapsed: elapsed)
+        var currentAngle: CGFloat = 0.0
 
-        // Stardust generation while in flight
-        if elapsed < flightDuration {
-            let dir: CGFloat = leftToRight ? 1.0 : -1.0
-            spawnParticle(x: caravanX - dir * CGFloat.random(in: 40...72), y: caravanY + CGFloat.random(in: -8...14), dir: dir)
-            spawnParticle(x: caravanX + dir * CGFloat.random(in: -20...24), y: caravanY + CGFloat.random(in: -14...2), dir: dir)
-        }
+        switch flightState {
+        case .cruising:
+            let progress = min(1.0, elapsed / flightDuration)
+            caravanX = startX + (endX - startX) * CGFloat(progress)
+            caravanY = yForProgress(progress, elapsed: elapsed)
+            currentAngle = computeTiltAngle(progress: progress, startX: startX, endX: endX)
 
-        // Parachute gift drop at progress >= 0.42
-        if progress >= 0.42 && !hasDroppedGift {
-            hasDroppedGift = true
+            if elapsed < flightDuration {
+                let dir: CGFloat = leftToRight ? 1.0 : -1.0
+                spawnParticle(x: caravanX - dir * CGFloat.random(in: 40...72), y: caravanY + CGFloat.random(in: (-8)...14), dir: dir)
+                spawnParticle(x: caravanX + dir * CGFloat.random(in: (-20)...24), y: caravanY + CGFloat.random(in: (-14)...2), dir: dir)
+            }
+
+            if progress >= 0.42 && !hasDroppedGift {
+                hasDroppedGift = true
+                let dir: CGFloat = leftToRight ? 1.0 : -1.0
+                giftDrops.append(GiftDrop(baseX: caravanX - dir * 42.0, y: caravanY - 8.0, vy: 62.0, age: 0.0))
+            }
+
+        case .crashing:
             let dir: CGFloat = leftToRight ? 1.0 : -1.0
-            giftDrops.append(GiftDrop(baseX: caravanX - dir * 42.0, y: caravanY - 8.0, vy: 62.0, age: 0.0))
+            caravanX += crashVX * CGFloat(dt)
+            caravanY += crashVY * CGFloat(dt)
+            crashVY -= 360.0 * CGFloat(dt)
+            crashVX *= 0.985
+
+            let minX: CGFloat = 75.0
+            let maxX: CGFloat = max(75.0, w - 75.0)
+            if caravanX < minX {
+                caravanX = minX
+                crashVX = -crashVX * 0.5
+            } else if caravanX > maxX {
+                caravanX = maxX
+                crashVX = -crashVX * 0.5
+            }
+
+            crashAngle = max(-0.78, crashAngle - 1.85 * CGFloat(dt)) + CGFloat(sin(elapsed * 20.0)) * 0.05
+            currentAngle = crashAngle
+            spawnParticle(x: caravanX, y: caravanY + 6.0, dir: dir)
+
+            if caravanY <= 24.0 {
+                caravanY = 22.0
+                flightState = .grounded
+                groundedTimer = 0.0
+                crashAngle = -0.24
+                currentAngle = crashAngle
+                ScreenEffectsManager.shared.handleSantaCrashLanding(onWindow: window, atLocalX: caravanX)
+            }
+
+        case .grounded:
+            groundedTimer += dt
+            caravanY = 22.0 + CGFloat(sin(groundedTimer * 7.5)) * 1.0
+            crashAngle = -0.22 + CGFloat(sin(groundedTimer * 5.0)) * 0.05
+            currentAngle = crashAngle
+
+            if Int(groundedTimer * 30.0) % 2 == 0 {
+                let starAngle = groundedTimer * 6.5
+                particles.append(StardustParticle(
+                    x: caravanX + CGFloat(cos(starAngle)) * 22.0,
+                    y: caravanY + 26.0 + CGFloat(sin(starAngle)) * 6.0,
+                    vx: 0,
+                    vy: 8.0,
+                    age: 0.0,
+                    maxAge: 0.35,
+                    size: 3.6,
+                    twinklePhase: 0.0,
+                    isSparkle: true,
+                    isGold: true
+                ))
+            }
+
+            if groundedTimer >= 3.2 {
+                flightState = .recovering
+                let dir: CGFloat = leftToRight ? 1.0 : -1.0
+                crashVX = dir * 185.0
+                crashVY = 135.0
+            }
+
+        case .recovering:
+            let dir: CGFloat = leftToRight ? 1.0 : -1.0
+            caravanX += crashVX * CGFloat(dt)
+            caravanY += crashVY * CGFloat(dt)
+            crashVY += 55.0 * CGFloat(dt)
+            crashAngle = 0.28
+            currentAngle = crashAngle
+            spawnParticle(x: caravanX - dir * 35.0, y: caravanY - 4.0, dir: dir)
         }
 
         // Update stardust particles
@@ -304,7 +434,9 @@ final class SantaSleighOverlayView: NSView {
         for i in (0..<giftDrops.count).reversed() {
             giftDrops[i].age += dt
             giftDrops[i].y -= giftDrops[i].vy * CGFloat(dt)
-            if giftDrops[i].y <= 0 {
+            if giftDrops[i].y <= 16.0 {
+                let sway = CGFloat(sin(giftDrops[i].age * 4.0)) * 6.0
+                ScreenEffectsManager.shared.handleGiftLandedOnSnow(onWindow: window, atLocalX: giftDrops[i].baseX + sway, style: style)
                 giftDrops.remove(at: i)
             }
         }
@@ -312,7 +444,12 @@ final class SantaSleighOverlayView: NSView {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
 
-        if elapsed <= flightDuration {
+        let shouldRenderSleigh = (flightState == .cruising && elapsed <= flightDuration) ||
+            flightState == .crashing ||
+            flightState == .grounded ||
+            (flightState == .recovering && caravanX >= -180.0 && caravanX <= w + 180.0 && caravanY <= h + 140.0)
+
+        if shouldRenderSleigh {
             let colorSpace = CGColorSpaceCreateDeviceRGB()
             if let ctx = CGContext(
                 data: nil,
@@ -329,10 +466,9 @@ final class SantaSleighOverlayView: NSView {
                 sleighLayer.contents = ctx.makeImage()
             }
             sleighLayer.position = CGPoint(x: caravanX, y: caravanY)
-            let tiltAngle = computeTiltAngle(progress: progress, startX: startX, endX: endX)
             var t = CATransform3DIdentity
             t = CATransform3DScale(t, leftToRight ? 1.0 : -1.0, 1.0, 1.0)
-            t = CATransform3DRotate(t, tiltAngle, 0, 0, 1)
+            t = CATransform3DRotate(t, currentAngle, 0, 0, 1)
             sleighLayer.transform = t
             sleighLayer.isHidden = false
         } else {
@@ -400,7 +536,17 @@ final class SantaSleighOverlayView: NSView {
 
         CATransaction.commit()
 
-        if elapsed >= totalDuration && (giftDrops.isEmpty || elapsed >= 14.0) {
+        let isFinished: Bool
+        switch flightState {
+        case .cruising:
+            isFinished = elapsed >= totalDuration && (giftDrops.isEmpty || elapsed >= 14.0)
+        case .crashing, .grounded:
+            isFinished = false
+        case .recovering:
+            isFinished = (caravanX < -180.0 || caravanX > w + 180.0 || caravanY > h + 140.0) && giftDrops.isEmpty
+        }
+
+        if isFinished {
             let finish = onComplete
             stop()
             finish?()
@@ -409,7 +555,7 @@ final class SantaSleighOverlayView: NSView {
 
     private func spawnParticle(x: CGFloat, y: CGFloat, dir: CGFloat) {
         particles.append(StardustParticle(
-            x: x + CGFloat.random(in: -4...4), y: y + CGFloat.random(in: -4...4),
+            x: x + CGFloat.random(in: (-4)...4), y: y + CGFloat.random(in: (-4)...4),
             vx: -dir * CGFloat.random(in: 12...28), vy: CGFloat.random(in: (-20)...(-6)),
             age: 0.0, maxAge: Double.random(in: 0.75...0.95),
             size: CGFloat.random(in: 2.2...4.4), twinklePhase: Double.random(in: 0...(.pi * 2)),
